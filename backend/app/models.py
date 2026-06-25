@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
 
-JsonObject = dict[str, Any] | list[Any]
+JsonObject = Union[dict[str, Any], list[Any]]
 
 
 class ImportRequest(BaseModel):
     prompt: JsonObject
     expectedResults: JsonObject
     response: JsonObject
-    label: str | None = None
+    label: Optional[str] = None
 
 
 class ValidateRequest(BaseModel):
@@ -26,15 +26,14 @@ class LoadSampleRequest(BaseModel):
 
 class ImportSummary(BaseModel):
     importId: str
-    label: str | None = None
+    label: Optional[str] = None
     vsId: Any = None
-    algorithm: str | None = None
-    mode: str | None = None
-    revision: str | None = None
+    algorithm: Optional[str] = None
+    mode: Optional[str] = None
+    revision: Optional[str] = None
     testGroupCount: int = 0
     testCaseCount: int = 0
 
 
 class ApiError(BaseModel):
     detail: str = Field(..., examples=["Unknown importId"])
-

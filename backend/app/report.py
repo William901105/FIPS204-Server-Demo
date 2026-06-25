@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -9,7 +9,7 @@ def build_report(import_id: str, validation_result: dict[str, Any]) -> dict[str,
     summary = validation_result["summary"]
     report = {
         "importId": import_id,
-        "generatedAt": datetime.now(UTC).isoformat(),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
         "algorithm": metadata.get("algorithm"),
         "mode": metadata.get("mode"),
         "revision": metadata.get("revision"),
@@ -82,4 +82,3 @@ def _escape_cell(value: Any) -> str:
     if value is None:
         return ""
     return str(value).replace("|", "\\|").replace("\n", " ")
-
