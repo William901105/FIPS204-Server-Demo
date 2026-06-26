@@ -84,7 +84,7 @@ def test_expected_results_endpoint_generates_keygen_results() -> None:
     assert "pk" in tests[0]
     assert "sk" in tests[0]
     assert "seed" not in tests[0]
-    assert "isSample" not in expected_results
+    assert expected_results["isSample"] == prompt["isSample"]
 
 
 def test_expected_results_endpoint_rejects_unsupported_mode() -> None:
@@ -113,7 +113,7 @@ def test_expected_results_endpoint_reports_missing_native_binary(monkeypatch) ->
     missing_binary = Path("/tmp/acvp-missing-mldsa44-keygen-oracle")
     monkeypatch.setitem(
         mldsa_oracle._PARAMETER_SETS["ML-DSA-44"],  # noqa: SLF001
-        "binary",
+        "keygen_binary",
         missing_binary,
     )
 
@@ -157,6 +157,21 @@ def test_sample_upload_validate_report_workflow_still_works() -> None:
     assert report["failedCount"] == 0
 
 
+def test_health_route_still_available() -> None:
+    from app.main import health
+
+    assert health() == {"status": "ok"}
+
+
+def test_generated_keygen_expected_results_exact_match_sample() -> None:
+    prompt = _read_json(KEYGEN_SAMPLE / "prompt.json")
+    sample_expected = _read_json(KEYGEN_SAMPLE / "expectedResults.json")
+
+    generated = generate_keygen_expected_results_from_prompt(prompt)
+
+    assert generated == sample_expected
+
+
 def _small_keygen_prompt(test_count: int) -> dict[str, Any]:
     prompt = _read_json(KEYGEN_SAMPLE / "prompt.json")
     small_prompt = copy.deepcopy(prompt)
@@ -188,6 +203,7 @@ def _sample_expected_subset(prompt: dict[str, Any]) -> dict[str, Any]:
         "algorithm": sample_expected["algorithm"],
         "mode": sample_expected["mode"],
         "revision": sample_expected["revision"],
+        "isSample": sample_expected["isSample"],
         "testGroups": groups,
     }
 

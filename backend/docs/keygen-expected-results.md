@@ -83,6 +83,19 @@ curl -X POST http://127.0.0.1:8000/api/oracle/mldsa/keygen/expected-results \
 
 The generated `expectedResults` preserves `vsId`, `algorithm`, `mode`, `revision`, `tgId`, and `tcId`, and includes `pk` and `sk`. It does not copy prompt `seed` values into response test cases.
 
+## Phase 2-2 oracle module refactor
+
+The ML-DSA oracle wrapper is split into focused modules:
+
+- `app.crypto_oracle.mldsa_errors` centralizes oracle exception classes.
+- `app.crypto_oracle.mldsa_constants` centralizes parameter set metadata and native binary paths.
+- `app.crypto_oracle.mldsa_helpers` centralizes hex validation, parameter-set validation, native subprocess execution, JSON parsing, and native output validation.
+- `app.crypto_oracle.mldsa_oracle` keeps the public oracle API and compatibility re-exports.
+
+`keygen_internal()` remains the only implemented ML-DSA oracle operation. `siggen_internal()` and `sigver_internal()` are Phase 2-2 stubs and will be implemented in later phases with native sigGen and sigVer binaries.
+
+Generated keyGen `expectedResults` preserve prompt top-level `isSample` metadata when present, but still do not copy prompt group fields such as `parameterSet` or `testType`, and do not copy test case `seed` values.
+
 ## Current non-goals
 
 The backend does not currently include:
@@ -90,6 +103,6 @@ The backend does not currently include:
 - `/acvp/v1/testSessions`
 - Database persistence
 - JWT authentication
-- sigGen oracle
-- sigVer oracle
+- sigGen native oracle
+- sigVer native oracle
 - Full ACVP vector set lifecycle

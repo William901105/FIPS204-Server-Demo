@@ -45,7 +45,7 @@ def _require_keygen_prompt(vector_set: Dict[str, Any]) -> None:
 
 
 def _build_expected_results(vector_set: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+    expected_results = {
         "vsId": vector_set["vsId"],
         "algorithm": ALGORITHM,
         "mode": "keyGen",
@@ -54,6 +54,9 @@ def _build_expected_results(vector_set: Dict[str, Any]) -> Dict[str, Any]:
             _build_expected_group(group) for group in vector_set["testGroups"]
         ],
     }
+    if "isSample" in vector_set:
+        expected_results["isSample"] = vector_set["isSample"]
+    return expected_results
 
 
 def _build_expected_group(group: Dict[str, Any]) -> Dict[str, Any]:
