@@ -6,6 +6,7 @@ This backend currently supports:
 - `POST /api/oracle/mldsa/keygen` for a single deterministic keyGen oracle call.
 - `POST /api/oracle/mldsa/keygen/expected-results` for generating keyGen `expectedResults` from an ACVP-style keyGen prompt.
 - `POST /api/import/generated-keygen` for importing a prompt plus response while generating keyGen `expectedResults` server-side.
+- `POST /api/oracle/mldsa/siggen` for a single internal deterministic sigGen oracle call.
 
 This is still a local demo service, not a formal ACVP server.
 
@@ -23,6 +24,9 @@ The build creates:
 bin/mldsa44_keygen_oracle
 bin/mldsa65_keygen_oracle
 bin/mldsa87_keygen_oracle
+bin/mldsa44_siggen_oracle
+bin/mldsa65_siggen_oracle
+bin/mldsa87_siggen_oracle
 ```
 
 ## Test the C oracle
@@ -33,6 +37,29 @@ cd backend/native/mldsa_oracle
 ```
 
 The output is JSON with `pk` and `sk`.
+
+## Call the single-case sigGen endpoint
+
+The Phase 2-3 sigGen oracle supports only ACVP internal deterministic signing:
+
+- `signatureInterface = "internal"`
+- `externalMu = false`
+- `deterministic = true`
+
+It uses the mldsa-native `signature_internal` API with a 32-byte all-zero `rnd`, `externalmu = 0`, and an empty prefix for direct FIPS 204 `ML-DSA.Sign_internal` input.
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/oracle/mldsa/siggen \
+  -H "Content-Type: application/json" \
+  -d '{
+    "parameterSet": "ML-DSA-44",
+    "signatureInterface": "internal",
+    "externalMu": false,
+    "deterministic": true,
+    "sk": "PUT_SECRET_KEY_HEX_HERE",
+    "message": "00010203040506070809"
+  }'
+```
 
 ## Start the backend
 
@@ -92,9 +119,19 @@ The ML-DSA oracle wrapper is split into focused modules:
 - `app.crypto_oracle.mldsa_helpers` centralizes hex validation, parameter-set validation, native subprocess execution, JSON parsing, and native output validation.
 - `app.crypto_oracle.mldsa_oracle` keeps the public oracle API and compatibility re-exports.
 
-`keygen_internal()` remains the only implemented ML-DSA oracle operation. `siggen_internal()` and `sigver_internal()` are Phase 2-2 stubs and will be implemented in later phases with native sigGen and sigVer binaries.
+After Phase 2-2, `keygen_internal()` remained the only implemented ML-DSA oracle operation and `siggen_internal()` / `sigver_internal()` were stubs. Phase 2-3 implements the restricted internal deterministic `siggen_internal()` path; `sigver_internal()` remains a stub.
 
 Generated keyGen `expectedResults` preserve prompt top-level `isSample` metadata when present, but still do not copy prompt group fields such as `parameterSet` or `testType`, and do not copy test case `seed` values.
+
+## Phase 2-3 sigGen internal deterministic oracle
+
+`siggen_internal()` is now implemented for one ACVP case shape: internal signature interface, `externalMu=false`, and deterministic signing. The native wrappers are:
+
+- `bin/mldsa44_siggen_oracle`
+- `bin/mldsa65_siggen_oracle`
+- `bin/mldsa87_siggen_oracle`
+
+Randomized sigGen, externalMu sigGen, external pure/preHash sigGen, and sigVer remain out of scope.
 
 ## Current non-goals
 
@@ -103,6 +140,7 @@ The backend does not currently include:
 - `/acvp/v1/testSessions`
 - Database persistence
 - JWT authentication
-- sigGen native oracle
+- randomized sigGen native oracle
+- externalMu sigGen native oracle
 - sigVer native oracle
 - Full ACVP vector set lifecycle

@@ -24,6 +24,10 @@ def normalize_hex(name: str, value: str, expected_bytes: Optional[int] = None) -
         raise MldsaOracleInputError(
             f"{name} must be exactly {expected_bytes * 2} hex characters"
         )
+    if len(value) % 2 != 0:
+        raise MldsaOracleInputError(
+            f"{name} must have an even number of hex characters"
+        )
     if _HEX_RE.fullmatch(value) is None:
         raise MldsaOracleInputError(f"{name} must contain only hex characters")
     return value.upper()

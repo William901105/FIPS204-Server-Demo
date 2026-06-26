@@ -69,3 +69,23 @@ class MldsaKeygenExpectedResultsResponse(BaseModel):
     mode: Literal["keyGen"] = "keyGen"
     revision: Literal["FIPS204"] = "FIPS204"
     expectedResults: JsonObject
+
+
+class MldsaSigGenRequest(BaseModel):
+    parameterSet: Literal["ML-DSA-44", "ML-DSA-65", "ML-DSA-87"]
+    signatureInterface: Literal["internal"] = "internal"
+    externalMu: Literal[False] = False
+    deterministic: Literal[True] = True
+    sk: str
+    message: str
+
+
+class MldsaSigGenResponse(BaseModel):
+    algorithm: Literal["ML-DSA"] = "ML-DSA"
+    mode: Literal["sigGen"] = "sigGen"
+    revision: Literal["FIPS204"] = "FIPS204"
+    parameterSet: str
+    signatureInterface: Literal["internal"] = "internal"
+    externalMu: Literal[False] = False
+    deterministic: Literal[True] = True
+    signature: str

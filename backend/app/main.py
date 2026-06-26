@@ -6,6 +6,7 @@ from uuid import uuid4
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from .acvp_mldsa.errors import AcvpSchemaError
 from .acvp_mldsa.expected import generate_keygen_expected_results_from_prompt
@@ -19,6 +20,7 @@ from .crypto_oracle.mldsa_oracle import (
     MldsaOracleError,
     MldsaOracleInputError,
     keygen_internal,
+    siggen_internal,
 )
 from .models import (
     GeneratedKeygenImportRequest,
@@ -29,6 +31,8 @@ from .models import (
     MldsaKeygenExpectedResultsResponse,
     MldsaKeygenRequest,
     MldsaKeygenResponse,
+    MldsaSigGenRequest,
+    MldsaSigGenResponse,
     ValidateRequest,
 )
 from .report import build_report
@@ -124,6 +128,24 @@ def mldsa_keygen_expected_results(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return MldsaKeygenExpectedResultsResponse(expectedResults=expected_results)
+
+
+@app.post("/api/oracle/mldsa/siggen", response_model=MldsaSigGenResponse)
+def mldsa_siggen(payload: Any = Body(...)) -> MldsaSigGenResponse:
+    try:
+        request = _parse_siggen_request(payload)
+        result = siggen_internal(request.parameterSet, request.sk, request.message)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.errors()) from exc
+    except MldsaOracleInputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MldsaOracleError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return MldsaSigGenResponse(
+        parameterSet=request.parameterSet,
+        signature=result["signature"],
+    )
 
 
 @app.post("/api/import", response_model=ImportSummary)
@@ -246,3 +268,9 @@ def _get_bundle(import_id: str) -> Dict[str, Any]:
 
 def _schema_error_response(exc: AcvpSchemaError) -> JSONResponse:
     return JSONResponse(status_code=400, content=exc.to_dict())
+
+
+def _parse_siggen_request(payload: Any) -> MldsaSigGenRequest:
+    if isinstance(payload, MldsaSigGenRequest):
+        return payload
+    return MldsaSigGenRequest.model_validate(payload)

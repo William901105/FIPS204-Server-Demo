@@ -30,9 +30,19 @@ def keygen_internal(parameter_set: str, seed_hex: str) -> dict[str, str]:
     return {"pk": pk, "sk": sk}
 
 
-def siggen_internal(*args, **kwargs) -> dict[str, str]:  # noqa: ANN002, ANN003
-    raise NotImplementedError("sigGen oracle is not implemented in Phase 2-2")
+def siggen_internal(
+    parameter_set: str,
+    sk_hex: str,
+    message_hex: str,
+) -> dict[str, str]:
+    config = validate_parameter_set(parameter_set)
+    sk = normalize_hex("sk", sk_hex, int(config["sk_bytes"]))
+    message = normalize_hex("message", message_hex)
+    completed = run_native_binary(config["siggen_binary"], [sk, message])
+    output = parse_json_output(completed.stdout)
+    signature = validate_hex_output(output, "signature", int(config["sig_bytes"]))
+    return {"signature": signature}
 
 
 def sigver_internal(*args, **kwargs) -> dict[str, bool]:  # noqa: ANN002, ANN003
-    raise NotImplementedError("sigVer oracle is not implemented in Phase 2-2")
+    raise NotImplementedError("sigVer oracle is not implemented in Phase 2-3")

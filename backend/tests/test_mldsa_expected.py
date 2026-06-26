@@ -17,6 +17,7 @@ from app.main import (
     load_sample_import,
     mldsa_keygen,
     mldsa_keygen_expected_results,
+    mldsa_siggen,
     validate_import,
 )
 from app.models import (
@@ -24,6 +25,7 @@ from app.models import (
     LoadSampleRequest,
     MldsaKeygenExpectedResultsRequest,
     MldsaKeygenRequest,
+    MldsaSigGenRequest,
     ValidateRequest,
 )
 
@@ -31,6 +33,7 @@ from app.models import (
 SAMPLE_ROOT = Path(__file__).resolve().parents[2] / "sample-data"
 KEYGEN_SAMPLE = SAMPLE_ROOT / "ML-DSA-keyGen-FIPS204"
 SEED_32_BYTES = "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F"
+MESSAGE_HEX = "00010203040506070809"
 
 
 def test_app_import_does_not_fail() -> None:
@@ -47,6 +50,50 @@ def test_keygen_endpoint_still_available() -> None:
     assert body.revision == "FIPS204"
     assert len(body.pk) == 1312 * 2
     assert len(body.sk) == 2560 * 2
+
+
+def test_siggen_endpoint_route_function_generates_signature() -> None:
+    keygen = mldsa_keygen(
+        MldsaKeygenRequest(parameterSet="ML-DSA-44", seed=SEED_32_BYTES)
+    )
+
+    body = mldsa_siggen(
+        MldsaSigGenRequest(
+            parameterSet="ML-DSA-44",
+            sk=keygen.sk,
+            message=MESSAGE_HEX,
+        )
+    )
+
+    assert body.algorithm == "ML-DSA"
+    assert body.mode == "sigGen"
+    assert body.revision == "FIPS204"
+    assert body.parameterSet == "ML-DSA-44"
+    assert body.signatureInterface == "internal"
+    assert body.externalMu is False
+    assert body.deterministic is True
+    assert len(body.signature) == 2420 * 2
+    assert body.signature == body.signature.upper()
+
+
+def test_siggen_endpoint_route_rejects_unsupported_flags() -> None:
+    keygen = mldsa_keygen(
+        MldsaKeygenRequest(parameterSet="ML-DSA-44", seed=SEED_32_BYTES)
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        mldsa_siggen(
+            {
+                "parameterSet": "ML-DSA-44",
+                "signatureInterface": "internal",
+                "externalMu": True,
+                "deterministic": True,
+                "sk": keygen.sk,
+                "message": MESSAGE_HEX,
+            }
+        )
+
+    assert exc_info.value.status_code == 400
 
 
 def test_generate_keygen_expected_results_matches_sample_subset() -> None:
