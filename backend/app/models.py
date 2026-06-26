@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
 
-JsonObject = Union[dict[str, Any], list[Any]]
+JsonObject = Union[Dict[str, Any], List[Any]]
 
 
 class ImportRequest(BaseModel):
@@ -37,3 +37,18 @@ class ImportSummary(BaseModel):
 
 class ApiError(BaseModel):
     detail: str = Field(..., examples=["Unknown importId"])
+
+
+class MldsaKeygenRequest(BaseModel):
+    parameterSet: str
+    seed: str
+
+
+class MldsaKeygenResponse(BaseModel):
+    algorithm: Literal["ML-DSA"] = "ML-DSA"
+    mode: Literal["keyGen"] = "keyGen"
+    revision: Literal["FIPS204"] = "FIPS204"
+    parameterSet: str
+    seed: str
+    pk: str
+    sk: str

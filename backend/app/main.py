@@ -3,9 +3,16 @@ from __future__ import annotations
 from typing import Any, Dict
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from .acvp_mldsa.errors import AcvpSchemaError
+from .acvp_mldsa.validators import (
+    validate_mldsa_registration,
+    validate_mldsa_response,
+    validate_mldsa_vector_set,
+)
 from .acvp_parser import AcvpParseError, normalize_acvp_json, summarize_vector_set
 from .crypto_oracle.mldsa_oracle import (
     MldsaOracleError,
@@ -52,6 +59,33 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+@app.post("/api/schema/mldsa/registration")
+def validate_mldsa_registration_schema(payload: Any = Body(...)) -> Any:
+    try:
+        normalized = validate_mldsa_registration(payload)
+    except AcvpSchemaError as exc:
+        return _schema_error_response(exc)
+    return {"ok": True, "type": "registration", "normalized": normalized}
+
+
+@app.post("/api/schema/mldsa/vector-set")
+def validate_mldsa_vector_set_schema(payload: Any = Body(...)) -> Any:
+    try:
+        normalized = validate_mldsa_vector_set(payload)
+    except AcvpSchemaError as exc:
+        return _schema_error_response(exc)
+    return {"ok": True, "type": "vector-set", "normalized": normalized}
+
+
+@app.post("/api/schema/mldsa/response")
+def validate_mldsa_response_schema(payload: Any = Body(...)) -> Any:
+    try:
+        normalized = validate_mldsa_response(payload)
+    except AcvpSchemaError as exc:
+        return _schema_error_response(exc)
+    return {"ok": True, "type": "response", "normalized": normalized}
+
+
 @app.post("/api/oracle/mldsa/keygen", response_model=MldsaKeygenResponse)
 def mldsa_keygen(payload: MldsaKeygenRequest) -> MldsaKeygenResponse:
     try:
@@ -70,8 +104,12 @@ def mldsa_keygen(payload: MldsaKeygenRequest) -> MldsaKeygenResponse:
 
 
 @app.post("/api/import", response_model=ImportSummary)
-def import_bundle(payload: ImportRequest) -> ImportSummary:
+def import_bundle(payload: ImportRequest) -> Any:
     try:
+        prompt_vs = validate_mldsa_vector_set(payload.prompt)
+        mode = prompt_vs.get("mode")
+        validate_mldsa_response(payload.expectedResults, expected_mode=mode)
+        validate_mldsa_response(payload.response, expected_mode=mode)
         bundle = {
             "prompt": payload.prompt,
             "expectedResults": payload.expectedResults,
@@ -79,6 +117,8 @@ def import_bundle(payload: ImportRequest) -> ImportSummary:
             "label": payload.label,
         }
         return _store_import(bundle)
+    except AcvpSchemaError as exc:
+        return _schema_error_response(exc)
     except (AcvpParseError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -156,3 +196,7 @@ def _get_bundle(import_id: str) -> Dict[str, Any]:
     if bundle is None:
         raise HTTPException(status_code=404, detail="Unknown importId")
     return bundle
+
+
+def _schema_error_response(exc: AcvpSchemaError) -> JSONResponse:
+    return JSONResponse(status_code=400, content=exc.to_dict())
