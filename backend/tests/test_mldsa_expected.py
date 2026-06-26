@@ -36,6 +36,8 @@ SAMPLE_ROOT = Path(__file__).resolve().parents[2] / "sample-data"
 KEYGEN_SAMPLE = SAMPLE_ROOT / "ML-DSA-keyGen-FIPS204"
 SEED_32_BYTES = "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F"
 MESSAGE_HEX = "00010203040506070809"
+CONTEXT_HEX = "0A0B0C"
+BAD_CONTEXT_HEX = "0A0B0D"
 MU_64_BYTES = (
     "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F"
     "202122232425262728292A2B2C2D2E2F303132333435363738393A3B3C3D3E3F"
@@ -152,6 +154,66 @@ def test_siggen_endpoint_route_function_supports_phase25_modes() -> None:
         assert response.signature == response.signature.upper()
 
 
+def test_siggen_endpoint_route_function_supports_external_pure_and_prehash() -> None:
+    keygen = mldsa_keygen(
+        MldsaKeygenRequest(parameterSet="ML-DSA-44", seed=SEED_32_BYTES)
+    )
+    pure = mldsa_siggen(
+        MldsaSigGenRequest(
+            parameterSet="ML-DSA-44",
+            signatureInterface="external",
+            deterministic=True,
+            sk=keygen.sk,
+            message=MESSAGE_HEX,
+            preHash="pure",
+            context=CONTEXT_HEX.lower(),
+        )
+    )
+    pure_randomized = mldsa_siggen(
+        MldsaSigGenRequest(
+            parameterSet="ML-DSA-44",
+            signatureInterface="external",
+            deterministic=False,
+            sk=keygen.sk,
+            message=MESSAGE_HEX,
+            preHash="pure",
+            context=CONTEXT_HEX,
+            rnd=RND_32_BYTES,
+        )
+    )
+    prehash = mldsa_siggen(
+        MldsaSigGenRequest(
+            parameterSet="ML-DSA-44",
+            signatureInterface="external",
+            deterministic=True,
+            sk=keygen.sk,
+            message=MESSAGE_HEX,
+            preHash="preHash",
+            context=CONTEXT_HEX,
+            hashAlg="SHA2-256",
+        )
+    )
+
+    for response in (pure, pure_randomized, prehash):
+        assert response.algorithm == "ML-DSA"
+        assert response.mode == "sigGen"
+        assert response.revision == "FIPS204"
+        assert response.parameterSet == "ML-DSA-44"
+        assert response.signatureInterface == "external"
+        assert response.externalMu is False
+        assert len(response.signature) == 2420 * 2
+        assert response.signature == response.signature.upper()
+
+    assert pure.deterministic is True
+    assert pure.preHash == "pure"
+    assert pure.context == CONTEXT_HEX
+    assert pure.hashAlg is None
+    assert pure_randomized.deterministic is False
+    assert prehash.preHash == "preHash"
+    assert prehash.context == CONTEXT_HEX
+    assert prehash.hashAlg == "SHA2-256"
+
+
 def test_siggen_endpoint_route_rejects_unsupported_flags() -> None:
     keygen = mldsa_keygen(
         MldsaKeygenRequest(parameterSet="ML-DSA-44", seed=SEED_32_BYTES)
@@ -207,6 +269,56 @@ def test_siggen_endpoint_route_rejects_phase25_invalid_combinations() -> None:
             "sk": keygen.sk,
             "message": MESSAGE_HEX,
             "rnd": RND_32_BYTES,
+        },
+        {
+            "parameterSet": "ML-DSA-44",
+            "signatureInterface": "internal",
+            "externalMu": False,
+            "deterministic": True,
+            "sk": keygen.sk,
+            "message": MESSAGE_HEX,
+            "preHash": "pure",
+        },
+        {
+            "parameterSet": "ML-DSA-44",
+            "signatureInterface": "external",
+            "externalMu": False,
+            "deterministic": True,
+            "sk": keygen.sk,
+            "message": MESSAGE_HEX,
+            "preHash": "pure",
+        },
+        {
+            "parameterSet": "ML-DSA-44",
+            "signatureInterface": "external",
+            "externalMu": False,
+            "deterministic": True,
+            "sk": keygen.sk,
+            "message": MESSAGE_HEX,
+            "preHash": "pure",
+            "context": CONTEXT_HEX,
+            "hashAlg": "SHA2-256",
+        },
+        {
+            "parameterSet": "ML-DSA-44",
+            "signatureInterface": "external",
+            "externalMu": False,
+            "deterministic": True,
+            "sk": keygen.sk,
+            "message": MESSAGE_HEX,
+            "preHash": "preHash",
+            "context": CONTEXT_HEX,
+        },
+        {
+            "parameterSet": "ML-DSA-44",
+            "signatureInterface": "external",
+            "externalMu": False,
+            "deterministic": True,
+            "sk": keygen.sk,
+            "message": MESSAGE_HEX,
+            "preHash": "preHash",
+            "context": CONTEXT_HEX,
+            "hashAlg": "SHAKE-128",
         },
     )
 
@@ -298,6 +410,95 @@ def test_sigver_endpoint_route_function_supports_external_mu() -> None:
     assert bad_mu.testPassed is False
 
 
+def test_sigver_endpoint_route_function_supports_external_pure_and_prehash() -> None:
+    keygen = mldsa_keygen(
+        MldsaKeygenRequest(parameterSet="ML-DSA-44", seed=SEED_32_BYTES)
+    )
+    pure_signature = mldsa_siggen(
+        MldsaSigGenRequest(
+            parameterSet="ML-DSA-44",
+            signatureInterface="external",
+            deterministic=True,
+            sk=keygen.sk,
+            message=MESSAGE_HEX,
+            preHash="pure",
+            context=CONTEXT_HEX,
+        )
+    ).signature
+    prehash_signature = mldsa_siggen(
+        MldsaSigGenRequest(
+            parameterSet="ML-DSA-44",
+            signatureInterface="external",
+            deterministic=True,
+            sk=keygen.sk,
+            message=MESSAGE_HEX,
+            preHash="preHash",
+            context=CONTEXT_HEX,
+            hashAlg="SHA2-256",
+        )
+    ).signature
+
+    pure_valid = mldsa_sigver(
+        MldsaSigVerRequest(
+            parameterSet="ML-DSA-44",
+            signatureInterface="external",
+            pk=keygen.pk,
+            message=MESSAGE_HEX,
+            signature=pure_signature,
+            preHash="pure",
+            context=CONTEXT_HEX.lower(),
+        )
+    )
+    pure_bad_context = mldsa_sigver(
+        MldsaSigVerRequest(
+            parameterSet="ML-DSA-44",
+            signatureInterface="external",
+            pk=keygen.pk,
+            message=MESSAGE_HEX,
+            signature=pure_signature,
+            preHash="pure",
+            context=BAD_CONTEXT_HEX,
+        )
+    )
+    prehash_valid = mldsa_sigver(
+        MldsaSigVerRequest(
+            parameterSet="ML-DSA-44",
+            signatureInterface="external",
+            pk=keygen.pk,
+            message=MESSAGE_HEX,
+            signature=prehash_signature,
+            preHash="preHash",
+            context=CONTEXT_HEX,
+            hashAlg="SHA2-256",
+        )
+    )
+    prehash_bad_message = mldsa_sigver(
+        MldsaSigVerRequest(
+            parameterSet="ML-DSA-44",
+            signatureInterface="external",
+            pk=keygen.pk,
+            message="00010203040506070808",
+            signature=prehash_signature,
+            preHash="preHash",
+            context=CONTEXT_HEX,
+            hashAlg="SHA2-256",
+        )
+    )
+
+    assert pure_valid.signatureInterface == "external"
+    assert pure_valid.externalMu is False
+    assert pure_valid.preHash == "pure"
+    assert pure_valid.context == CONTEXT_HEX
+    assert pure_valid.hashAlg is None
+    assert pure_valid.testPassed is True
+    assert pure_bad_context.testPassed is False
+    assert prehash_valid.preHash == "preHash"
+    assert prehash_valid.context == CONTEXT_HEX
+    assert prehash_valid.hashAlg == "SHA2-256"
+    assert prehash_valid.testPassed is True
+    assert prehash_bad_message.testPassed is False
+
+
 def test_sigver_endpoint_route_rejects_unsupported_flags() -> None:
     keygen = mldsa_keygen(
         MldsaKeygenRequest(parameterSet="ML-DSA-44", seed=SEED_32_BYTES)
@@ -368,6 +569,56 @@ def test_sigver_endpoint_route_rejects_phase25_invalid_combinations() -> None:
             "message": MESSAGE_HEX,
             "mu": MU_64_BYTES,
             "signature": signature,
+        },
+        {
+            "parameterSet": "ML-DSA-44",
+            "signatureInterface": "internal",
+            "externalMu": False,
+            "pk": keygen.pk,
+            "message": MESSAGE_HEX,
+            "signature": signature,
+            "preHash": "pure",
+        },
+        {
+            "parameterSet": "ML-DSA-44",
+            "signatureInterface": "external",
+            "externalMu": False,
+            "pk": keygen.pk,
+            "message": MESSAGE_HEX,
+            "signature": signature,
+            "preHash": "pure",
+        },
+        {
+            "parameterSet": "ML-DSA-44",
+            "signatureInterface": "external",
+            "externalMu": False,
+            "pk": keygen.pk,
+            "message": MESSAGE_HEX,
+            "signature": signature,
+            "preHash": "pure",
+            "context": CONTEXT_HEX,
+            "hashAlg": "SHA2-256",
+        },
+        {
+            "parameterSet": "ML-DSA-44",
+            "signatureInterface": "external",
+            "externalMu": False,
+            "pk": keygen.pk,
+            "message": MESSAGE_HEX,
+            "signature": signature,
+            "preHash": "preHash",
+            "context": CONTEXT_HEX,
+        },
+        {
+            "parameterSet": "ML-DSA-44",
+            "signatureInterface": "external",
+            "externalMu": False,
+            "pk": keygen.pk,
+            "message": MESSAGE_HEX,
+            "signature": signature,
+            "preHash": "preHash",
+            "context": CONTEXT_HEX,
+            "hashAlg": "SHAKE-256",
         },
     )
 

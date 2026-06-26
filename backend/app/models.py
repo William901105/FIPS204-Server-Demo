@@ -73,26 +73,51 @@ class MldsaKeygenExpectedResultsResponse(BaseModel):
 
 class MldsaSigGenRequest(BaseModel):
     parameterSet: Literal["ML-DSA-44", "ML-DSA-65", "ML-DSA-87"]
-    signatureInterface: Literal["internal"] = "internal"
+    signatureInterface: Literal["internal", "external"] = "internal"
     externalMu: bool = False
     deterministic: bool = True
     sk: str
     message: Optional[str] = None
     mu: Optional[str] = None
     rnd: Optional[str] = None
+    preHash: Optional[Literal["pure", "preHash"]] = None
+    context: Optional[str] = None
+    hashAlg: Optional[str] = None
 
     @model_validator(mode="after")
-    def validate_internal_siggen_inputs(self) -> "MldsaSigGenRequest":
-        if self.externalMu:
-            if self.mu is None:
-                raise ValueError("mu is required when externalMu=true")
-            if self.message is not None:
-                raise ValueError("message is not allowed when externalMu=true")
-        else:
-            if self.message is None:
-                raise ValueError("message is required when externalMu=false")
+    def validate_siggen_inputs(self) -> "MldsaSigGenRequest":
+        if self.signatureInterface == "external":
+            if self.externalMu:
+                raise ValueError("externalMu is not allowed when signatureInterface=external")
             if self.mu is not None:
-                raise ValueError("mu is not allowed when externalMu=false")
+                raise ValueError("mu is not allowed when signatureInterface=external")
+            if self.message is None:
+                raise ValueError("message is required when signatureInterface=external")
+            if self.preHash is None:
+                raise ValueError("preHash is required when signatureInterface=external")
+            if self.context is None:
+                raise ValueError("context is required when signatureInterface=external")
+            if self.preHash == "pure" and self.hashAlg is not None:
+                raise ValueError("hashAlg is not allowed when preHash=pure")
+            if self.preHash == "preHash" and self.hashAlg is None:
+                raise ValueError("hashAlg is required when preHash=preHash")
+        else:
+            if self.preHash is not None:
+                raise ValueError("preHash is not allowed when signatureInterface=internal")
+            if self.context is not None:
+                raise ValueError("context is not allowed when signatureInterface=internal")
+            if self.hashAlg is not None:
+                raise ValueError("hashAlg is not allowed when signatureInterface=internal")
+            if self.externalMu:
+                if self.mu is None:
+                    raise ValueError("mu is required when externalMu=true")
+                if self.message is not None:
+                    raise ValueError("message is not allowed when externalMu=true")
+            else:
+                if self.message is None:
+                    raise ValueError("message is required when externalMu=false")
+                if self.mu is not None:
+                    raise ValueError("mu is not allowed when externalMu=false")
 
         if self.deterministic:
             if self.rnd is not None:
@@ -108,33 +133,61 @@ class MldsaSigGenResponse(BaseModel):
     mode: Literal["sigGen"] = "sigGen"
     revision: Literal["FIPS204"] = "FIPS204"
     parameterSet: str
-    signatureInterface: Literal["internal"] = "internal"
+    signatureInterface: Literal["internal", "external"] = "internal"
     externalMu: bool
     deterministic: bool
+    preHash: Optional[Literal["pure", "preHash"]] = None
+    context: Optional[str] = None
+    hashAlg: Optional[str] = None
     signature: str
 
 
 class MldsaSigVerRequest(BaseModel):
     parameterSet: Literal["ML-DSA-44", "ML-DSA-65", "ML-DSA-87"]
-    signatureInterface: Literal["internal"] = "internal"
+    signatureInterface: Literal["internal", "external"] = "internal"
     externalMu: bool = False
     pk: str
     message: Optional[str] = None
     mu: Optional[str] = None
     signature: str
+    preHash: Optional[Literal["pure", "preHash"]] = None
+    context: Optional[str] = None
+    hashAlg: Optional[str] = None
 
     @model_validator(mode="after")
-    def validate_internal_sigver_inputs(self) -> "MldsaSigVerRequest":
-        if self.externalMu:
-            if self.mu is None:
-                raise ValueError("mu is required when externalMu=true")
-            if self.message is not None:
-                raise ValueError("message is not allowed when externalMu=true")
-        else:
-            if self.message is None:
-                raise ValueError("message is required when externalMu=false")
+    def validate_sigver_inputs(self) -> "MldsaSigVerRequest":
+        if self.signatureInterface == "external":
+            if self.externalMu:
+                raise ValueError("externalMu is not allowed when signatureInterface=external")
             if self.mu is not None:
-                raise ValueError("mu is not allowed when externalMu=false")
+                raise ValueError("mu is not allowed when signatureInterface=external")
+            if self.message is None:
+                raise ValueError("message is required when signatureInterface=external")
+            if self.preHash is None:
+                raise ValueError("preHash is required when signatureInterface=external")
+            if self.context is None:
+                raise ValueError("context is required when signatureInterface=external")
+            if self.preHash == "pure" and self.hashAlg is not None:
+                raise ValueError("hashAlg is not allowed when preHash=pure")
+            if self.preHash == "preHash" and self.hashAlg is None:
+                raise ValueError("hashAlg is required when preHash=preHash")
+        else:
+            if self.preHash is not None:
+                raise ValueError("preHash is not allowed when signatureInterface=internal")
+            if self.context is not None:
+                raise ValueError("context is not allowed when signatureInterface=internal")
+            if self.hashAlg is not None:
+                raise ValueError("hashAlg is not allowed when signatureInterface=internal")
+            if self.externalMu:
+                if self.mu is None:
+                    raise ValueError("mu is required when externalMu=true")
+                if self.message is not None:
+                    raise ValueError("message is not allowed when externalMu=true")
+            else:
+                if self.message is None:
+                    raise ValueError("message is required when externalMu=false")
+                if self.mu is not None:
+                    raise ValueError("mu is not allowed when externalMu=false")
         return self
 
 
@@ -143,6 +196,9 @@ class MldsaSigVerResponse(BaseModel):
     mode: Literal["sigVer"] = "sigVer"
     revision: Literal["FIPS204"] = "FIPS204"
     parameterSet: str
-    signatureInterface: Literal["internal"] = "internal"
+    signatureInterface: Literal["internal", "external"] = "internal"
     externalMu: bool
+    preHash: Optional[Literal["pure", "preHash"]] = None
+    context: Optional[str] = None
+    hashAlg: Optional[str] = None
     testPassed: bool

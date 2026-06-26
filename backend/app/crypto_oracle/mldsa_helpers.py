@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import subprocess
 from pathlib import Path
@@ -31,6 +32,49 @@ def normalize_hex(name: str, value: str, expected_bytes: Optional[int] = None) -
     if _HEX_RE.fullmatch(value) is None:
         raise MldsaOracleInputError(f"{name} must contain only hex characters")
     return value.upper()
+
+
+def normalize_context_hex(value: Optional[str]) -> str:
+    if value is None:
+        return ""
+    context = normalize_hex("context", value)
+    if len(context) // 2 > 255:
+        raise MldsaOracleInputError("context must be at most 255 bytes")
+    return context
+
+
+def hash_message_for_prehash(message_hex: str, hash_alg: Optional[str]) -> str:
+    message = bytes.fromhex(normalize_hex("message", message_hex))
+    if hash_alg is None:
+        raise MldsaOracleInputError("hashAlg is required when preHash=preHash")
+
+    normalized = hash_alg.upper()
+    if normalized == "SHA2-224":
+        return hashlib.sha224(message).hexdigest().upper()
+    if normalized == "SHA2-256":
+        return hashlib.sha256(message).hexdigest().upper()
+    if normalized == "SHA2-384":
+        return hashlib.sha384(message).hexdigest().upper()
+    if normalized == "SHA2-512":
+        return hashlib.sha512(message).hexdigest().upper()
+    if normalized == "SHA2-512/224":
+        return hashlib.new("sha512_224", message).hexdigest().upper()
+    if normalized == "SHA2-512/256":
+        return hashlib.new("sha512_256", message).hexdigest().upper()
+    if normalized == "SHA3-224":
+        return hashlib.sha3_224(message).hexdigest().upper()
+    if normalized == "SHA3-256":
+        return hashlib.sha3_256(message).hexdigest().upper()
+    if normalized == "SHA3-384":
+        return hashlib.sha3_384(message).hexdigest().upper()
+    if normalized == "SHA3-512":
+        return hashlib.sha3_512(message).hexdigest().upper()
+    if normalized in {"SHAKE-128", "SHAKE-256"}:
+        raise MldsaOracleInputError(
+            "SHAKE hashAlg is not supported by the Python oracle because "
+            "ACVP output length is not represented in this API"
+        )
+    raise MldsaOracleInputError(f"unsupported hashAlg {hash_alg!r}")
 
 
 def validate_parameter_set(parameter_set: str) -> Dict[str, Any]:

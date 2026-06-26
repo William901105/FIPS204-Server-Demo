@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from uuid import uuid4
 
 from fastapi import Body, FastAPI, HTTPException
@@ -145,6 +145,10 @@ def mldsa_siggen(payload: Any = Body(...)) -> MldsaSigGenResponse:
             rnd_hex=request.rnd,
             external_mu=request.externalMu,
             deterministic=request.deterministic,
+            signature_interface=request.signatureInterface,
+            pre_hash=request.preHash,
+            context_hex=request.context,
+            hash_alg=request.hashAlg,
         )
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=_validation_error_detail(exc)) from exc
@@ -155,8 +159,12 @@ def mldsa_siggen(payload: Any = Body(...)) -> MldsaSigGenResponse:
 
     return MldsaSigGenResponse(
         parameterSet=request.parameterSet,
+        signatureInterface=request.signatureInterface,
         externalMu=request.externalMu,
         deterministic=request.deterministic,
+        preHash=request.preHash,
+        context=_normalize_optional_hex_for_response(request.context),
+        hashAlg=_normalize_optional_text_for_response(request.hashAlg),
         signature=result["signature"],
     )
 
@@ -172,6 +180,10 @@ def mldsa_sigver(payload: Any = Body(...)) -> MldsaSigVerResponse:
             request.signature,
             mu_hex=request.mu,
             external_mu=request.externalMu,
+            signature_interface=request.signatureInterface,
+            pre_hash=request.preHash,
+            context_hex=request.context,
+            hash_alg=request.hashAlg,
         )
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=_validation_error_detail(exc)) from exc
@@ -182,7 +194,11 @@ def mldsa_sigver(payload: Any = Body(...)) -> MldsaSigVerResponse:
 
     return MldsaSigVerResponse(
         parameterSet=request.parameterSet,
+        signatureInterface=request.signatureInterface,
         externalMu=request.externalMu,
+        preHash=request.preHash,
+        context=_normalize_optional_hex_for_response(request.context),
+        hashAlg=_normalize_optional_text_for_response(request.hashAlg),
         testPassed=result["testPassed"],
     )
 
@@ -326,3 +342,15 @@ def _validation_error_detail(exc: ValidationError) -> Any:
         return exc.errors(include_context=False)
     except TypeError:
         return exc.errors()
+
+
+def _normalize_optional_hex_for_response(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    return value.upper()
+
+
+def _normalize_optional_text_for_response(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    return value.upper()

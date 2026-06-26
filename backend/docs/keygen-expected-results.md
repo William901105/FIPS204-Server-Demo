@@ -6,8 +6,8 @@ This backend currently supports:
 - `POST /api/oracle/mldsa/keygen` for a single deterministic keyGen oracle call.
 - `POST /api/oracle/mldsa/keygen/expected-results` for generating keyGen `expectedResults` from an ACVP-style keyGen prompt.
 - `POST /api/import/generated-keygen` for importing a prompt plus response while generating keyGen `expectedResults` server-side.
-- `POST /api/oracle/mldsa/siggen` for single-case internal sigGen oracle calls.
-- `POST /api/oracle/mldsa/sigver` for single-case internal sigVer oracle calls.
+- `POST /api/oracle/mldsa/siggen` for single-case internal and external sigGen oracle calls.
+- `POST /api/oracle/mldsa/sigver` for single-case internal and external sigVer oracle calls.
 
 This is still a local demo service, not a formal ACVP server.
 
@@ -44,13 +44,23 @@ The output is JSON with `pk` and `sk`.
 
 ## Call the single-case sigGen endpoint
 
-The sigGen oracle supports ACVP internal signing only:
+The sigGen oracle supports ACVP internal signing:
 
 - `signatureInterface = "internal"`
 - `externalMu = false` with `message`
 - `externalMu = true` with `mu`
 - `deterministic = true` with fixed all-zero internal `rnd`
 - `deterministic = false` with caller-provided ACVP `rnd`
+
+It also supports ACVP external signing:
+
+- `signatureInterface = "external"`
+- `preHash = "pure"` with `message`
+- `preHash = "preHash"` with `message` plus `hashAlg`
+- `context` as a hex string from 0 to 255 bytes
+- `externalMu` and `mu` are not allowed
+- `deterministic = true` uses fixed all-zero native `rnd`
+- `deterministic = false` requires caller-provided 32-byte `rnd`
 
 It uses the mldsa-native `signature_internal` API with an empty prefix. The
 server never generates randomness for `deterministic=false`; the request must
@@ -84,13 +94,51 @@ curl -X POST http://127.0.0.1:8000/api/oracle/mldsa/siggen \
   }'
 ```
 
+```bash
+curl -X POST http://127.0.0.1:8000/api/oracle/mldsa/siggen \
+  -H "Content-Type: application/json" \
+  -d '{
+    "parameterSet": "ML-DSA-44",
+    "signatureInterface": "external",
+    "deterministic": true,
+    "sk": "PUT_SECRET_KEY_HEX_HERE",
+    "message": "00010203040506070809",
+    "preHash": "pure",
+    "context": ""
+  }'
+```
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/oracle/mldsa/siggen \
+  -H "Content-Type: application/json" \
+  -d '{
+    "parameterSet": "ML-DSA-44",
+    "signatureInterface": "external",
+    "deterministic": false,
+    "sk": "PUT_SECRET_KEY_HEX_HERE",
+    "message": "00010203040506070809",
+    "preHash": "preHash",
+    "context": "0A0B0C",
+    "hashAlg": "SHA2-256",
+    "rnd": "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F"
+  }'
+```
+
 ## Call the single-case sigVer endpoint
 
-The sigVer oracle supports ACVP internal verification only:
+The sigVer oracle supports ACVP internal verification:
 
 - `signatureInterface = "internal"`
 - `externalMu = false` with `message`
 - `externalMu = true` with `mu`
+
+It also supports ACVP external verification:
+
+- `signatureInterface = "external"`
+- `preHash = "pure"` with `message`
+- `preHash = "preHash"` with `message` plus `hashAlg`
+- `context` as a hex string from 0 to 255 bytes
+- `externalMu` and `mu` are not allowed
 
 It uses the mldsa-native `verify_internal` API with an empty prefix, matching
 the internal sigGen oracle path.
@@ -125,6 +173,20 @@ PY
 )
 
 ./bin/mldsa44_sigver_oracle "$PK" "$MESSAGE" "$SIG"
+```
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/oracle/mldsa/sigver \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"parameterSet\": \"ML-DSA-44\",
+    \"signatureInterface\": \"external\",
+    \"pk\": \"$PK\",
+    \"message\": \"00010203040506070809\",
+    \"signature\": \"$SIG\",
+    \"preHash\": \"pure\",
+    \"context\": \"\"
+  }"
 ```
 
 ```bash
@@ -280,9 +342,53 @@ It also supports:
 ./bin/mldsa44_sigver_oracle 1 "$PK" "$MU" "$SIG"
 ```
 
-External signatureInterface, context, hashAlg, preHash, generic
-expectedResults, sigGen/sigVer expectedResults generation, and full ACVP
-lifecycle endpoints remain out of scope.
+Generic expectedResults, sigGen/sigVer expectedResults generation, and full
+ACVP lifecycle endpoints remain out of scope.
+
+## Phase 2-6 external pure and preHash coverage
+
+sigGen external CLI:
+
+```bash
+./bin/mldsa44_siggen_oracle external pure 1 "$SK" "$MESSAGE" "$CTX"
+./bin/mldsa44_siggen_oracle external pure 0 "$SK" "$MESSAGE" "$CTX" "$RND"
+./bin/mldsa44_siggen_oracle external preHash 1 "$SK" "$PH" "$CTX" SHA2-256
+./bin/mldsa44_siggen_oracle external preHash 0 "$SK" "$PH" "$CTX" SHA2-256 "$RND"
+```
+
+sigVer external CLI:
+
+```bash
+./bin/mldsa44_sigver_oracle external pure "$PK" "$MESSAGE" "$CTX" "$SIG"
+./bin/mldsa44_sigver_oracle external preHash "$PK" "$PH" "$CTX" SHA2-256 "$SIG"
+```
+
+`CTX` is a hex string whose decoded length must be 0 to 255 bytes. For
+external pure, the native wrapper prepares the FIPS 204 domain-separation
+prefix with `MLD_PREHASH_NONE` and calls `mldsa_signature_internal()` /
+`mldsa_verify_internal()` with `externalmu=0`. For external preHash, Python
+hashes the message first and the native wrapper calls
+`mldsa_signature_pre_hash_internal()` / `mldsa_verify_pre_hash_internal()`.
+
+Supported Python/API `hashAlg` values are:
+
+```text
+SHA2-224
+SHA2-256
+SHA2-384
+SHA2-512
+SHA2-512/224
+SHA2-512/256
+SHA3-224
+SHA3-256
+SHA3-384
+SHA3-512
+```
+
+The native CLI also maps `SHAKE-128` and `SHAKE-256` to the corresponding
+`mldsa-native` prehash constants when the caller supplies an already-sized
+prehash. The Python/API oracle rejects SHAKE for external preHash because this
+API does not carry an explicit SHAKE output length.
 
 ## Current non-goals
 
@@ -291,10 +397,6 @@ The backend does not currently include:
 - `/acvp/v1/testSessions`
 - Database persistence
 - JWT authentication
-- external signatureInterface support
-- context support
-- hashAlg support
-- preHash support
 - sigGen expectedResults generator
 - sigVer expectedResults generator
 - generic expectedResults endpoint
