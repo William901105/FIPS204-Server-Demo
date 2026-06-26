@@ -51,6 +51,11 @@ def validate(imported_bundle: dict[str, Any]) -> dict[str, Any]:
     prompt_index = index_test_cases(prompt_vs)
     response_index = index_test_cases(response_vs)
     expected_cases = flatten_test_cases(expected_vs)
+    expected_index = {
+        (case["tgId"], case["tcId"]): case["test"]
+        for case in expected_cases
+        if case.get("tgId") is not None and case.get("tcId") is not None
+    }
 
     case_results: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
@@ -99,12 +104,43 @@ def validate(imported_bundle: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    for (tg_id, tc_id), response_tc in sorted(
+        response_index.items(),
+        key=lambda item: (str(item[0][0]), str(item[0][1])),
+    ):
+        if (tg_id, tc_id) in expected_index:
+            continue
+        status = "extra"
+        failure = {
+            "tgId": tg_id,
+            "tcId": tc_id,
+            "field": "tcId",
+            "reason": "extra response test case",
+            "expected": None,
+            "provided": tc_id,
+        }
+        failures.append(failure)
+        counts[status] += 1
+        case_results.append(
+            {
+                "tgId": tg_id,
+                "tcId": tc_id,
+                "status": status,
+                "prompt": prompt_index.get((tg_id, tc_id)),
+                "expected": None,
+                "response": response_tc,
+                "failures": [failure],
+                "group": None,
+            }
+        )
+
     summary = {
         "total": len(expected_cases),
         "passed": counts["passed"],
         "failed": counts["failed"],
         "missing": counts["missing"],
         "malformed": counts["malformed"],
+        "extra": counts["extra"],
     }
 
     return {
@@ -174,4 +210,3 @@ def _display_value(value: Any) -> Any:
     if isinstance(value, str) and len(value) > 160:
         return f"{value[:72]}...{value[-32:]} ({len(value)} chars)"
     return value
-

@@ -19,6 +19,7 @@ def build_report(import_id: str, validation_result: dict[str, Any]) -> dict[str,
         "failedCount": summary["failed"],
         "missingCount": summary["missing"],
         "malformedCount": summary["malformed"],
+        "extraCount": summary.get("extra", 0),
         "failureDetails": validation_result["failures"],
     }
     report["markdown"] = export_report_markdown(report)
@@ -42,11 +43,12 @@ def export_report_markdown(report: dict[str, Any]) -> str:
         "",
         "## Summary",
         "",
-        "| total | passed | failed | missing | malformed |",
-        "| ---: | ---: | ---: | ---: | ---: |",
+        "| total | passed | failed | missing | malformed | extra |",
+        "| ---: | ---: | ---: | ---: | ---: | ---: |",
         (
             f"| {report['totalTestCases']} | {report['passedCount']} | "
-            f"{report['failedCount']} | {report['missingCount']} | {report['malformedCount']} |"
+            f"{report['failedCount']} | {report['missingCount']} | "
+            f"{report['malformedCount']} | {report['extraCount']} |"
         ),
         "",
         "## Failure Details",

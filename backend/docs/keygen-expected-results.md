@@ -6,6 +6,8 @@ This backend currently supports:
 - `POST /api/oracle/mldsa/keygen` for a single deterministic keyGen oracle call.
 - `POST /api/oracle/mldsa/keygen/expected-results` for generating keyGen `expectedResults` from an ACVP-style keyGen prompt.
 - `POST /api/oracle/mldsa/expected-results` for generating keyGen, sigGen, or sigVer `expectedResults` from an ACVP-style prompt.
+- `POST /api/import/generated` and `POST /api/import/generated-and-validate` for generated expectedResults import flows.
+- `/api/demo/acvp/test-sessions` endpoints for an in-memory local demo lifecycle.
 - `POST /api/import/generated-keygen` for importing a prompt plus response while generating keyGen `expectedResults` server-side.
 - `POST /api/oracle/mldsa/siggen` for single-case internal and external sigGen oracle calls.
 - `POST /api/oracle/mldsa/sigver` for single-case internal and external sigVer oracle calls.
@@ -514,6 +516,46 @@ Current limitation: generic sigGen/sigVer external preHash follows the
 Python/API oracle limitation for SHAKE and rejects `SHAKE-128` / `SHAKE-256`
 because this API does not carry an explicit SHAKE output length.
 
+## Phase 2-8 generated import pipeline
+
+The generated import endpoint accepts `prompt + response`, generates
+expectedResults from the prompt, validates both expectedResults and response
+schemas, stores the import bundle, and returns the existing `ImportSummary`.
+
+```text
+POST /api/import/generated
+POST /api/import/generated-and-validate
+```
+
+`generated-and-validate` additionally runs validation and builds a report in
+one call. The existing keyGen-only endpoint remains available:
+
+```text
+POST /api/import/generated-keygen
+```
+
+Validation summaries include `extra` response cases in addition to `passed`,
+`failed`, `missing`, and `malformed`. Report markdown includes the same extra
+count.
+
+## Phase 2-9 local demo lifecycle
+
+The local demo lifecycle uses `/api/demo/acvp`, not official `/acvp/v1`.
+
+```text
+POST   /api/demo/acvp/test-sessions
+GET    /api/demo/acvp/test-sessions
+GET    /api/demo/acvp/test-sessions/{sessionId}
+GET    /api/demo/acvp/test-sessions/{sessionId}/vector-set
+POST   /api/demo/acvp/test-sessions/{sessionId}/responses
+GET    /api/demo/acvp/test-sessions/{sessionId}/validation
+GET    /api/demo/acvp/test-sessions/{sessionId}/report
+DELETE /api/demo/acvp/test-sessions/{sessionId}
+```
+
+Responses are marked with `demoOnly=true` and `notProductionAcvp=true`. This
+is an in-memory local demo, not a production ACVP server.
+
 ## Current non-goals
 
 The backend does not currently include:
@@ -522,4 +564,5 @@ The backend does not currently include:
 - Registration negotiation
 - Database persistence
 - JWT authentication
-- Full ACVP vector set lifecycle
+- Production ACVP vector set lifecycle
+- Certificate workflow

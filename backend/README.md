@@ -57,3 +57,8 @@ Current scope:
 - Single-case ML-DSA keyGen, sigGen, and sigVer endpoints are supported.
 - `POST /api/oracle/mldsa/expected-results` generates keyGen, sigGen, and
   sigVer expectedResults for validated ML-DSA prompt vector sets.
+- `POST /api/import/generated` and
+  `POST /api/import/generated-and-validate` support generated expectedResults
+  import and validation flows for keyGen, sigGen, and sigVer.
+- `/api/demo/acvp/test-sessions` provides an in-memory local demo lifecycle.
+  It is marked as demo-only and is not the official ACVP production protocol.

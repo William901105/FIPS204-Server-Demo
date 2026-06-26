@@ -21,6 +21,12 @@ class GeneratedKeygenImportRequest(BaseModel):
     label: Optional[str] = None
 
 
+class GeneratedMldsaImportRequest(BaseModel):
+    prompt: JsonObject
+    response: JsonObject
+    label: Optional[str] = None
+
+
 class ValidateRequest(BaseModel):
     importId: str
 
@@ -43,6 +49,17 @@ class ImportSummary(BaseModel):
 
 class ApiError(BaseModel):
     detail: str = Field(..., examples=["Unknown importId"])
+
+
+class DemoAcvpSessionCreateRequest(BaseModel):
+    prompt: JsonObject
+    label: Optional[str] = None
+    autoGenerateExpectedResults: bool = True
+
+
+class DemoAcvpResponseSubmitRequest(BaseModel):
+    response: JsonObject
+    validateImmediately: bool = True
 
 
 class MldsaKeygenRequest(BaseModel):

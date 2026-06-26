@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
@@ -27,7 +28,10 @@ from .crypto_oracle.mldsa_oracle import (
     sigver_internal,
 )
 from .models import (
+    DemoAcvpResponseSubmitRequest,
+    DemoAcvpSessionCreateRequest,
     GeneratedKeygenImportRequest,
+    GeneratedMldsaImportRequest,
     ImportRequest,
     ImportSummary,
     LoadSampleRequest,
@@ -68,6 +72,7 @@ app.add_middleware(
 )
 
 IMPORT_STORE: Dict[str, Dict[str, Any]] = {}
+DEMO_SESSION_STORE: Dict[str, Dict[str, Any]] = {}
 
 
 @app.get("/api/health")
@@ -274,6 +279,47 @@ def import_generated_keygen_bundle(payload: GeneratedKeygenImportRequest) -> Any
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.post("/api/import/generated", response_model=ImportSummary)
+def import_generated_mldsa_bundle(payload: GeneratedMldsaImportRequest) -> ImportSummary:
+    try:
+        return _import_generated_mldsa_bundle(payload)
+    except AcvpSchemaError as exc:
+        raise HTTPException(status_code=400, detail=exc.to_dict()) from exc
+    except MldsaOracleInputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MldsaOracleError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except (AcvpParseError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/import/generated-and-validate")
+def import_generated_mldsa_bundle_and_validate(
+    payload: GeneratedMldsaImportRequest,
+) -> Dict[str, Any]:
+    try:
+        imported = _import_generated_mldsa_bundle(payload)
+        bundle = _get_bundle(imported.importId)
+        validation_result = validate(bundle)
+        report = build_report(imported.importId, validation_result)
+        bundle["validationResult"] = validation_result
+        bundle["report"] = report
+    except AcvpSchemaError as exc:
+        raise HTTPException(status_code=400, detail=exc.to_dict()) from exc
+    except MldsaOracleInputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MldsaOracleError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except (AcvpParseError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "import": _model_to_dict(imported),
+        "validationResult": validation_result,
+        "report": report,
+    }
+
+
 @app.post("/api/validate")
 def validate_import(payload: ValidateRequest) -> Dict[str, Any]:
     bundle = _get_bundle(payload.importId)
@@ -325,6 +371,232 @@ def load_sample_import(payload: LoadSampleRequest) -> ImportSummary:
         return _store_import(bundle)
     except (SampleLoaderError, AcvpParseError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/demo/acvp/test-sessions")
+def create_demo_acvp_session(payload: DemoAcvpSessionCreateRequest) -> Dict[str, Any]:
+    try:
+        prompt_vs = validate_mldsa_vector_set(payload.prompt)
+        expected_results = None
+        if payload.autoGenerateExpectedResults:
+            expected_results = generate_expected_results_from_prompt(payload.prompt)
+            validate_mldsa_response(expected_results, expected_mode=prompt_vs["mode"])
+    except AcvpSchemaError as exc:
+        raise HTTPException(status_code=400, detail=exc.to_dict()) from exc
+    except MldsaOracleInputError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MldsaOracleError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    now = _timestamp()
+    session_id = str(uuid4())
+    session = {
+        "sessionId": session_id,
+        "createdAt": now,
+        "updatedAt": now,
+        "status": "vectorReady" if expected_results is not None else "created",
+        "label": payload.label,
+        "prompt": payload.prompt,
+        "expectedResults": expected_results,
+        "response": None,
+        "validationResult": None,
+        "report": None,
+        "importId": None,
+        "demoOnly": True,
+        "notProductionAcvp": True,
+    }
+    DEMO_SESSION_STORE[session_id] = session
+    return _demo_session_summary(session)
+
+
+@app.get("/api/demo/acvp/test-sessions")
+def list_demo_acvp_sessions() -> Dict[str, Any]:
+    return {
+        "demoOnly": True,
+        "notProductionAcvp": True,
+        "sessions": [
+            _demo_session_summary(session)
+            for session in DEMO_SESSION_STORE.values()
+        ],
+    }
+
+
+@app.get("/api/demo/acvp/test-sessions/{session_id}")
+def get_demo_acvp_session(session_id: str) -> Dict[str, Any]:
+    return _public_demo_session(_get_demo_session(session_id))
+
+
+@app.get("/api/demo/acvp/test-sessions/{session_id}/vector-set")
+def get_demo_acvp_session_vector_set(session_id: str) -> Dict[str, Any]:
+    session = _get_demo_session(session_id)
+    return {
+        "sessionId": session_id,
+        "demoOnly": True,
+        "notProductionAcvp": True,
+        "prompt": session["prompt"],
+    }
+
+
+@app.post("/api/demo/acvp/test-sessions/{session_id}/responses")
+def submit_demo_acvp_session_response(
+    session_id: str,
+    payload: DemoAcvpResponseSubmitRequest,
+) -> Dict[str, Any]:
+    session = _get_demo_session(session_id)
+    mode = normalize_acvp_json(session["prompt"]).get("mode")
+    try:
+        validate_mldsa_response(payload.response, expected_mode=mode)
+    except AcvpSchemaError as exc:
+        raise HTTPException(status_code=400, detail=exc.to_dict()) from exc
+
+    session["response"] = payload.response
+    session["updatedAt"] = _timestamp()
+    session["status"] = "responseSubmitted"
+
+    validation_result = None
+    if payload.validateImmediately:
+        validation_result = _validate_demo_session(session)
+
+    return {
+        "sessionId": session_id,
+        "status": session["status"],
+        "validationResult": validation_result,
+        "demoOnly": True,
+        "notProductionAcvp": True,
+    }
+
+
+@app.get("/api/demo/acvp/test-sessions/{session_id}/validation")
+def get_demo_acvp_session_validation(session_id: str) -> Dict[str, Any]:
+    session = _get_demo_session(session_id)
+    if session["response"] is None:
+        raise HTTPException(status_code=409, detail="Response has not been submitted")
+    if session["validationResult"] is None:
+        _validate_demo_session(session)
+    return {
+        "sessionId": session_id,
+        "validationResult": session["validationResult"],
+        "demoOnly": True,
+        "notProductionAcvp": True,
+    }
+
+
+@app.get("/api/demo/acvp/test-sessions/{session_id}/report")
+def get_demo_acvp_session_report(session_id: str) -> Dict[str, Any]:
+    session = _get_demo_session(session_id)
+    if session["response"] is None:
+        raise HTTPException(status_code=409, detail="Response has not been submitted")
+    if session["report"] is None:
+        _validate_demo_session(session)
+    report = dict(session["report"])
+    report["sessionId"] = session_id
+    report["demoOnly"] = True
+    report["notProductionAcvp"] = True
+    return report
+
+
+@app.delete("/api/demo/acvp/test-sessions/{session_id}")
+def delete_demo_acvp_session(session_id: str) -> Dict[str, Any]:
+    _get_demo_session(session_id)
+    del DEMO_SESSION_STORE[session_id]
+    return {
+        "deleted": True,
+        "sessionId": session_id,
+        "demoOnly": True,
+        "notProductionAcvp": True,
+    }
+
+
+def _import_generated_mldsa_bundle(payload: GeneratedMldsaImportRequest) -> ImportSummary:
+    prompt_vs = validate_mldsa_vector_set(payload.prompt)
+    mode = prompt_vs["mode"]
+    expected_results = generate_expected_results_from_prompt(payload.prompt)
+    validate_mldsa_response(expected_results, expected_mode=mode)
+    validate_mldsa_response(payload.response, expected_mode=mode)
+    bundle = {
+        "prompt": payload.prompt,
+        "expectedResults": expected_results,
+        "response": payload.response,
+        "label": payload.label,
+        "generatedExpectedResults": True,
+    }
+    return _store_import(bundle)
+
+
+def _validate_demo_session(session: Dict[str, Any]) -> Dict[str, Any]:
+    if session["expectedResults"] is None:
+        raise HTTPException(status_code=409, detail="Expected results are not available")
+    if session["response"] is None:
+        raise HTTPException(status_code=409, detail="Response has not been submitted")
+
+    bundle = {
+        "prompt": session["prompt"],
+        "expectedResults": session["expectedResults"],
+        "response": session["response"],
+        "label": session.get("label"),
+    }
+    validation_result = validate(bundle)
+    report = build_report(session["sessionId"], validation_result)
+    session["validationResult"] = validation_result
+    session["report"] = report
+    session["updatedAt"] = _timestamp()
+    session["status"] = (
+        "validated" if _validation_passed(validation_result) else "failed"
+    )
+    return validation_result
+
+
+def _validation_passed(validation_result: Dict[str, Any]) -> bool:
+    summary = validation_result["summary"]
+    return (
+        summary["failed"] == 0
+        and summary["missing"] == 0
+        and summary["malformed"] == 0
+        and summary.get("extra", 0) == 0
+    )
+
+
+def _demo_session_summary(session: Dict[str, Any]) -> Dict[str, Any]:
+    prompt_summary = summarize_vector_set(normalize_acvp_json(session["prompt"]))
+    return {
+        "sessionId": session["sessionId"],
+        "createdAt": session["createdAt"],
+        "updatedAt": session["updatedAt"],
+        "status": session["status"],
+        "label": session.get("label"),
+        **prompt_summary,
+        "demoOnly": True,
+        "notProductionAcvp": True,
+    }
+
+
+def _public_demo_session(session: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        **_demo_session_summary(session),
+        "prompt": session["prompt"],
+        "expectedResults": session["expectedResults"],
+        "response": session["response"],
+        "validationResult": session["validationResult"],
+        "report": session["report"],
+        "importId": session["importId"],
+    }
+
+
+def _get_demo_session(session_id: str) -> Dict[str, Any]:
+    session = DEMO_SESSION_STORE.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Unknown demo sessionId")
+    return session
+
+
+def _timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _model_to_dict(value: Any) -> Dict[str, Any]:
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    return value.dict()
 
 
 def _store_import(bundle: Dict[str, Any]) -> ImportSummary:
