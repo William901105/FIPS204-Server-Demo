@@ -7,6 +7,9 @@ DOC = Path(__file__).resolve().parents[1] / "docs" / "acvp-conformance-matrix.md
 VECTOR_GENERATION_DOC = (
     Path(__file__).resolve().parents[1] / "docs" / "acvp-v1-vector-generation.md"
 )
+PROTOCOL_HARDENING_DOC = (
+    Path(__file__).resolve().parents[1] / "docs" / "acvp-v1-protocol-hardening.md"
+)
 
 
 def test_acvp_conformance_matrix_exists_and_references_nist_sources() -> None:
@@ -55,6 +58,7 @@ def test_acvp_conformance_matrix_lists_required_future_phases() -> None:
         "Phase 3-5",
         "Phase 4-1",
         "Phase 4-2",
+        "Phase 4-3",
     ):
         assert phase in text
 
@@ -69,3 +73,14 @@ def test_acvp_v1_vector_generation_doc_exists_and_documents_scope() -> None:
     assert "POST /acvp/v1/testSessions/{sessionId}/vectorSets/generate" in text
     assert "not a production-ready ACVP server" in text
     assert "SHAKE-128" in text
+
+
+def test_acvp_v1_protocol_hardening_doc_exists_and_documents_phase_4_3() -> None:
+    assert PROTOCOL_HARDENING_DOC.exists()
+    text = PROTOCOL_HARDENING_DOC.read_text(encoding="utf-8")
+
+    assert "Phase 4-3 Commit 1" in text
+    assert "/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}/expected" in text
+    assert "extensions.localFips204Skeleton" in text
+    assert "localCompatibilityAlias=true" in text
+    assert "Results disposition adapter remains Phase 4-3C" in text

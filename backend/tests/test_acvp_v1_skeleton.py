@@ -30,6 +30,67 @@ from app.acvp_protocol.routes import (
 
 SEED_32_BYTES = "000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F"
 
+_raw_create_acvp_v1_test_session = create_acvp_v1_test_session
+_raw_delete_acvp_v1_test_session = delete_acvp_v1_test_session
+_raw_get_acvp_v1_algorithms = get_acvp_v1_algorithms
+_raw_get_acvp_v1_test_session = get_acvp_v1_test_session
+_raw_get_acvp_v1_test_session_results = get_acvp_v1_test_session_results
+_raw_get_acvp_v1_test_session_vector_sets = get_acvp_v1_test_session_vector_sets
+_raw_get_acvp_v1_vector_set = get_acvp_v1_vector_set
+_raw_get_acvp_v1_vector_set_expected_results = get_acvp_v1_vector_set_expected_results
+_raw_get_acvp_v1_vector_set_results = get_acvp_v1_vector_set_results
+_raw_get_acvp_v1_version = get_acvp_v1_version
+_raw_list_acvp_v1_test_sessions = list_acvp_v1_test_sessions
+_raw_submit_acvp_v1_vector_set_results = submit_acvp_v1_vector_set_results
+
+
+def create_acvp_v1_test_session(*args: Any, **kwargs: Any) -> Any:
+    return route_body(_raw_create_acvp_v1_test_session(*args, **kwargs))
+
+
+def delete_acvp_v1_test_session(*args: Any, **kwargs: Any) -> Any:
+    return route_body(_raw_delete_acvp_v1_test_session(*args, **kwargs))
+
+
+def get_acvp_v1_algorithms(*args: Any, **kwargs: Any) -> Any:
+    return route_body(_raw_get_acvp_v1_algorithms(*args, **kwargs))
+
+
+def get_acvp_v1_test_session(*args: Any, **kwargs: Any) -> Any:
+    return route_body(_raw_get_acvp_v1_test_session(*args, **kwargs))
+
+
+def get_acvp_v1_test_session_results(*args: Any, **kwargs: Any) -> Any:
+    return route_body(_raw_get_acvp_v1_test_session_results(*args, **kwargs))
+
+
+def get_acvp_v1_test_session_vector_sets(*args: Any, **kwargs: Any) -> Any:
+    return route_body(_raw_get_acvp_v1_test_session_vector_sets(*args, **kwargs))
+
+
+def get_acvp_v1_vector_set(*args: Any, **kwargs: Any) -> Any:
+    return route_body(_raw_get_acvp_v1_vector_set(*args, **kwargs))
+
+
+def get_acvp_v1_vector_set_expected_results(*args: Any, **kwargs: Any) -> Any:
+    return route_body(_raw_get_acvp_v1_vector_set_expected_results(*args, **kwargs))
+
+
+def get_acvp_v1_vector_set_results(*args: Any, **kwargs: Any) -> Any:
+    return route_body(_raw_get_acvp_v1_vector_set_results(*args, **kwargs))
+
+
+def get_acvp_v1_version(*args: Any, **kwargs: Any) -> Any:
+    return route_body(_raw_get_acvp_v1_version(*args, **kwargs))
+
+
+def list_acvp_v1_test_sessions(*args: Any, **kwargs: Any) -> Any:
+    return route_body(_raw_list_acvp_v1_test_sessions(*args, **kwargs))
+
+
+def submit_acvp_v1_vector_set_results(*args: Any, **kwargs: Any) -> Any:
+    return route_body(_raw_submit_acvp_v1_vector_set_results(*args, **kwargs))
+
 
 @pytest.fixture(autouse=True)
 def clear_acvp_v1_skeleton_stores() -> None:
@@ -46,6 +107,9 @@ def test_acvp_v1_routes_are_registered() -> None:
         "/acvp/v1/testSessions",
         "/acvp/v1/testSessions/{sessionId}",
         "/acvp/v1/testSessions/{sessionId}/vectorSets",
+        "/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}",
+        "/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}/results",
+        "/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}/expected",
         "/acvp/v1/vectorSets/{vectorSetId}",
         "/acvp/v1/vectorSets/{vectorSetId}/results",
         "/acvp/v1/vectorSets/{vectorSetId}/expectedResults",
@@ -58,7 +122,6 @@ def test_version_and_algorithms_return_skeleton_metadata() -> None:
     version = get_acvp_v1_version()
     algorithms = get_acvp_v1_algorithms()
 
-    assert version["productionReady"] is False
     assert version["apiVersion"] == "v1"
     assert_skeleton_metadata(version)
 
@@ -206,10 +269,11 @@ def test_submit_before_vector_ready_returns_409() -> None:
 
 
 def assert_skeleton_metadata(body: Dict[str, Any]) -> None:
-    assert body["productionReady"] is False
-    assert body["profile"] == "local-fips204-skeleton"
-    assert body["demoOnly"] is True
-    assert body["notProductionAcvp"] is True
+    metadata = body.get("extensions", {}).get("localFips204Skeleton", body)
+    assert metadata["productionReady"] is False
+    assert metadata["profile"] == "local-fips204-skeleton"
+    assert metadata["demoOnly"] is True
+    assert metadata["notProductionAcvp"] is True
 
 
 def assert_json_response(value: Any, status_code: int) -> None:
@@ -219,8 +283,21 @@ def assert_json_response(value: Any, status_code: int) -> None:
 
 def body_of(value: Any) -> Dict[str, Any]:
     if isinstance(value, JSONResponse):
-        return json.loads(value.body.decode("utf-8"))
+        value = json.loads(value.body.decode("utf-8"))
+    if (
+        isinstance(value, list)
+        and len(value) >= 2
+        and isinstance(value[0], dict)
+        and value[0].get("acvVersion") == "1.0"
+    ):
+        return value[1]
     return value
+
+
+def route_body(value: Any) -> Any:
+    if isinstance(value, JSONResponse):
+        return value
+    return body_of(value)
 
 
 def keygen_prompt() -> Dict[str, Any]:
