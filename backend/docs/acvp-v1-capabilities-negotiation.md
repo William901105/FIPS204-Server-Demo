@@ -1,6 +1,6 @@
 # ACVP v1 Capabilities Negotiation
 
-Phase 3-3 added a local ML-DSA registration/capabilities negotiation layer for the `/acvp/v1` skeleton. Phase 3-4 can use the negotiated plan to generate deterministic local vector sets. This remains based on the NIST ACVP Protocol Specification registration/capabilities exchange model and the NIST ACVP ML-DSA JSON Specification, and it is still not a production-ready ACVP server.
+Phase 3-3 added a local ML-DSA registration/capabilities negotiation layer for the `/acvp/v1` skeleton. Phase 3-4 can use the negotiated plan to generate deterministic local vector sets, and Phase 3-5 attaches those sessions to the local state machine. This remains based on the NIST ACVP Protocol Specification registration/capabilities exchange model and the NIST ACVP ML-DSA JSON Specification, and it is still not a production-ready ACVP server.
 
 References:
 
@@ -70,11 +70,11 @@ With `autoGenerateVectorSets=false`, the server creates an in-memory capabilitie
     "unsupported": [],
     "warnings": []
   },
-  "nextAction": "Server-side vector generation from negotiated capabilities is available in Phase 3-4; enable autoGenerateVectorSets or call /vectorSets/generate."
+  "nextAction": "Server-side vector generation from negotiated capabilities is available in Phase 3-5; enable autoGenerateVectorSets or call /vectorSets/generate."
 }
 ```
 
-By default in Phase 3-4, registration sessions use `autoGenerateVectorSets=true` and become `vectorReady`. Capabilities-only sessions still return an empty vector set list until the explicit generation endpoint is called.
+By default in Phase 3-5, registration sessions use `autoGenerateVectorSets=true`, record `stateHistory`, and become `vectorReady`. Capabilities-only sessions still return an empty vector set list until the explicit generation endpoint is called.
 
 ## SHAKE Handling
 

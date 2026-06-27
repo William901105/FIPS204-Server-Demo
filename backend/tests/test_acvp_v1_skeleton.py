@@ -128,11 +128,12 @@ def test_create_list_detail_vector_expected_submit_results_and_delete_flow() -> 
 
     deleted = delete_acvp_v1_test_session(session_id)
     assert_skeleton_metadata(deleted)
-    assert deleted["deleted"] is True
+    assert deleted["cancelled"] is True
+    assert deleted["status"] == "cancelled"
 
-    missing_after_delete = get_acvp_v1_test_session(session_id)
-    assert_json_response(missing_after_delete, 404)
-    assert_skeleton_metadata(body_of(missing_after_delete))
+    after_delete = get_acvp_v1_test_session(session_id)
+    assert_skeleton_metadata(after_delete)
+    assert after_delete["status"] == "cancelled"
 
 
 def test_submit_wrong_response_validates_failed() -> None:

@@ -1,6 +1,6 @@
 # ACVP v1 Vector Generation
 
-Phase 3-4 adds deterministic local skeleton vector generation from negotiated ML-DSA capabilities. It follows the NIST ACVP Protocol Specification and the NIST ACVP ML-DSA JSON Specification where those documents define the payload shape. This is not a production-ready ACVP server.
+Phase 3-4 added deterministic local skeleton vector generation from negotiated ML-DSA capabilities. Phase 3-5 keeps that behavior and attaches it to the formal local testSession/vectorSet state machine. It follows the NIST ACVP Protocol Specification and the NIST ACVP ML-DSA JSON Specification where those documents define the payload shape. This is not a production-ready ACVP server.
 
 References:
 
@@ -98,7 +98,15 @@ Request:
 }
 ```
 
-If vector sets already exist, the endpoint returns `409 VECTOR_SETS_ALREADY_GENERATED`.
+If vector sets already exist, the endpoint returns `409 VECTOR_SETS_ALREADY_GENERATED`. If the session is cancelled or expired, the endpoint returns a `409` local state-machine error. Prompt-based sessions return `409 NEGOTIATED_CAPABILITIES_NOT_AVAILABLE`.
+
+Successful generation records `stateHistory` events:
+
+- session `capabilitiesAccepted -> vectorReady`
+- session `vectorGenerated`
+- vector set `created -> ready`
+
+Generated vector sets inherit the session `expiresAt` when no explicit generation expiration is supplied. `expiresInSeconds` on the explicit generate request sets the expiration for generated vector sets.
 
 ## Generated ML-DSA Prompts
 
@@ -128,19 +136,37 @@ sigVer:
 
 Generated prompts are validated with `validate_mldsa_vector_set()`. Generated expectedResults are produced by `generate_expected_results_from_prompt()` and validated with `validate_mldsa_response()`.
 
+## Phase 3-5 State Machine Interaction
+
+Vector generation does not use wall-clock time for vector bytes. The Phase 3-5 clock is used only for lifecycle metadata:
+
+- `createdAt`
+- `updatedAt`
+- `downloadedAt`
+- `submittedAt`
+- `validatedAt`
+- `expiresAt`
+- `stateHistory[*].at`
+
+`GET /acvp/v1/vectorSets/{vectorSetId}` marks a `ready` vector set as `downloaded`. When every vector set in the session has been downloaded, the session becomes `vectorDownloaded`.
+
+`POST /acvp/v1/vectorSets/{vectorSetId}/results` keeps Phase 3-4 matching-response behavior, but now records `resultsSubmitted`, `validating`, and `validated` or `failed` transitions.
+
 ## SHAKE
 
 `SHAKE-128` and `SHAKE-256` may be accepted by the schema, but Phase 3-4 does not generate SHAKE preHash cases because the current API does not represent SHAKE output length. If another supported hash remains, SHAKE appears in warnings/unsupported entries and is excluded from generated groups. If only SHAKE remains for preHash generation, the request is rejected.
 
 ## Exclusions
 
-Phase 3-4 does not include:
+Phase 3-5 still does not include:
 
 - DB persistence
 - JWT/login/mTLS
-- formal production ACVP lifecycle
+- production ACVP lifecycle
 - vendor/module/OE/dependency resources
 - frontend changes
 - mldsa-native changes
+- formal paging/query/error hardening
+- async or large submission handling
 
-Follow-up: Phase 3-5 formal testSession/vectorSet state machine.
+See `backend/docs/acvp-v1-state-machine.md` for the supported local skeleton lifecycle. DB persistence remains Phase 4-1, auth/JWT/mTLS remains Phase 4-2, paging/query/error hardening remains Phase 4-3, and async/large submission remains Phase 4-4.

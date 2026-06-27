@@ -76,7 +76,7 @@ def test_siggen_internal_external_registration_accepted() -> None:
     assert_skeleton_metadata(response)
     assert response["status"] == "capabilitiesAccepted"
     assert response["vectorSetIds"] == []
-    assert "Phase 3-4" in response["nextAction"]
+    assert "Phase 3-5" in response["nextAction"]
 
     negotiated = response["negotiatedCapabilities"]["negotiated"][0]
     assert negotiated["mode"] == "sigGen"
@@ -250,7 +250,7 @@ def test_capabilities_only_session_vector_sets_endpoint_returns_empty_list() -> 
 
     assert_skeleton_metadata(vector_sets)
     assert vector_sets["vectorSets"] == []
-    assert "Phase 3-4" in vector_sets["nextAction"]
+    assert "Phase 3-5" in vector_sets["nextAction"]
 
 
 def test_capabilities_only_session_results_returns_409_before_vector_generation() -> None:
@@ -262,7 +262,7 @@ def test_capabilities_only_session_results_returns_409_before_vector_generation(
     assert_json_response(response, 409)
     body = body_of(response)
     assert body["error"]["code"] == "VECTOR_SETS_NOT_GENERATED"
-    assert "Phase 3-4" in body["error"]["message"]
+    assert "Generate vector sets" in body["error"]["message"]
     assert_skeleton_metadata(body)
 
 

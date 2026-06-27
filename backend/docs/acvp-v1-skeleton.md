@@ -1,6 +1,6 @@
 # ACVP v1 Skeleton
 
-Phase 3-2 added a formal `/acvp/v1` namespace as a local skeleton. Phase 3-3 extended it with local ML-DSA registration/capabilities negotiation. Phase 3-4 adds deterministic local vector generation from negotiated capabilities. It is not a production-ready ACVP server and every response includes:
+Phase 3-2 added a formal `/acvp/v1` namespace as a local skeleton. Phase 3-3 extended it with local ML-DSA registration/capabilities negotiation. Phase 3-4 added deterministic local vector generation from negotiated capabilities. Phase 3-5 adds a formal in-memory local state machine for test sessions and vector sets. It is not a production-ready ACVP server and every response includes:
 
 ```json
 {
@@ -27,14 +27,16 @@ References:
 | GET | `/acvp/v1/testSessions` | Lists in-memory skeleton sessions. |
 | POST | `/acvp/v1/testSessions` | Creates a local prompt-based skeleton session or a registration session that can generate vector sets. |
 | GET | `/acvp/v1/testSessions/{sessionId}` | Returns skeleton session detail and vector set metadata. |
-| GET | `/acvp/v1/testSessions/{sessionId}/vectorSets` | Lists vector sets for a skeleton session; registration-only sessions return an empty list and Phase 3-4 next action. |
-| POST | `/acvp/v1/testSessions/{sessionId}/vectorSets/generate` | Generates vector sets for a capabilitiesAccepted session. |
-| GET | `/acvp/v1/vectorSets/{vectorSetId}` | Returns the local prompt/vector set. This is a skeleton convenience path, not a production claim. |
-| POST | `/acvp/v1/vectorSets/{vectorSetId}/results` | Validates a submitted response against generated expectedResults. |
+| GET | `/acvp/v1/testSessions/{sessionId}/vectorSets` | Lists vector sets for a skeleton session; registration-only sessions return an empty list and Phase 3-5 next action. |
+| POST | `/acvp/v1/testSessions/{sessionId}/vectorSets/generate` | Generates vector sets for a `capabilitiesAccepted` session. |
+| GET | `/acvp/v1/vectorSets/{vectorSetId}` | Returns the local prompt/vector set and marks `ready` vector sets as `downloaded`. |
+| POST | `/acvp/v1/vectorSets/{vectorSetId}/results` | Validates a submitted response against generated expectedResults and updates vector/session state. |
 | GET | `/acvp/v1/vectorSets/{vectorSetId}/results` | Returns stored local validation result. |
 | GET | `/acvp/v1/vectorSets/{vectorSetId}/expectedResults` | Returns generated expectedResults as local skeleton behavior. Production ACVP handling requires spec review. |
 | GET | `/acvp/v1/testSessions/{sessionId}/results` | Aggregates local vector set results; registration-only sessions return `409 VECTOR_SETS_NOT_GENERATED`. |
-| DELETE | `/acvp/v1/testSessions/{sessionId}` | Deletes the in-memory skeleton session and vector set mappings. |
+| POST | `/acvp/v1/testSessions/{sessionId}/submit` | Performs local session-level submit-for-validation aggregate finalization. |
+| DELETE | `/acvp/v1/testSessions/{sessionId}` | Soft-cancels the in-memory skeleton session and non-terminal vector sets. |
+| DELETE | `/acvp/v1/vectorSets/{vectorSetId}` | Soft-cancels one vector set; all-cancelled sessions become `cancelled`. |
 
 ## Create Session Example
 
@@ -74,6 +76,7 @@ Response shape:
   "status": "vectorReady",
   "vectorSetUrls": ["/acvp/v1/vectorSets/uuid"],
   "vectorSetIds": ["uuid"],
+  "stateHistory": [],
   "productionReady": false,
   "profile": "local-fips204-skeleton",
   "demoOnly": true,
@@ -83,7 +86,7 @@ Response shape:
 
 ## Registration Session Example
 
-Phase 3-4 accepts a local skeleton registration container and generates vector sets by default:
+Phase 3-5 keeps the Phase 3-4 local skeleton registration container and generates vector sets by default:
 
 ```json
 {
@@ -125,6 +128,7 @@ Response shape:
     "generationProfile": "phase-3-4-deterministic-local",
     "localSkeletonBehavior": true
   },
+  "stateHistory": [],
   "productionReady": false,
   "profile": "local-fips204-skeleton",
   "demoOnly": true,
@@ -169,6 +173,28 @@ A local response submission wraps an ML-DSA response object:
 
 The response includes `validationResult` and `report` fields from the local validator. This is local skeleton behavior and does not replace a formal production ACVP validation workflow.
 
+## Phase 3-5 State Machine
+
+Test sessions use these local statuses:
+
+```text
+created -> capabilitiesAccepted -> vectorReady -> vectorDownloaded -> resultsSubmitted -> validating -> validated/failed
+```
+
+`cancelled` and `expired` are terminal. Prompt-based sessions can move directly from `created` to `vectorReady` when `autoGenerateExpectedResults=true`. Vector sets use:
+
+```text
+created -> ready -> downloaded -> resultsSubmitted -> validating -> validated/failed
+```
+
+State changes append `stateHistory` events with `at`, `event`, `from`, `to`, and `reason`. Illegal state transitions return `409` local skeleton errors. Full details are in `backend/docs/acvp-v1-state-machine.md`.
+
+## Soft Cancel And Expiration
+
+`DELETE /acvp/v1/testSessions/{sessionId}` no longer hard-deletes local records. It transitions the session to `cancelled`, transitions non-terminal vector sets to `cancelled`, and leaves the session retrievable for inspection.
+
+`expiresInSeconds` can be supplied on session create or explicit vector generation. Expiration is checked on stateful endpoints and returns `409 TEST_SESSION_EXPIRED` or `409 VECTOR_SET_EXPIRED`; there is no background scheduler.
+
 ## Exclusions
 
 The skeleton intentionally does not include:
@@ -179,10 +205,10 @@ The skeleton intentionally does not include:
 - official production ACVP certification workflow
 - vendor/module/OE/dependency CRUD
 - async or large submission handling
+- formal paging/query/error hardening
 
 Planned follow-up phases:
 
-- Phase 3-5 formal state machine
 - Phase 4-1 DB persistence
 - Phase 4-2 auth/JWT/mTLS
 - Phase 4-3 paging/error/query

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse
@@ -14,6 +14,7 @@ from ..models import (
 from .service import (
     acvp_skeleton_error,
     algorithms,
+    cancel_vector_set,
     create_test_session,
     delete_test_session,
     generate_vector_sets_for_session,
@@ -24,6 +25,7 @@ from .service import (
     get_vector_set_expected_results,
     get_vector_set_results,
     list_test_sessions,
+    submit_test_session_for_validation,
     submit_vector_set_results,
     version,
 )
@@ -43,8 +45,8 @@ def get_acvp_v1_algorithms() -> Dict[str, Any]:
 
 
 @router.get("/testSessions")
-def list_acvp_v1_test_sessions() -> Dict[str, Any]:
-    return list_test_sessions()
+def list_acvp_v1_test_sessions(status: Optional[str] = None) -> Dict[str, Any]:
+    return list_test_sessions(status=status)
 
 
 @router.post("/testSessions")
@@ -81,6 +83,14 @@ def get_acvp_v1_test_session_results(sessionId: str) -> Any:
     return get_test_session_results(sessionId)
 
 
+@router.post("/testSessions/{sessionId}/submit")
+def submit_acvp_v1_test_session(
+    sessionId: str,
+    payload: Any = Body(default=None),
+) -> Any:
+    return submit_test_session_for_validation(sessionId)
+
+
 @router.delete("/testSessions/{sessionId}")
 def delete_acvp_v1_test_session(sessionId: str) -> Any:
     return delete_test_session(sessionId)
@@ -89,6 +99,11 @@ def delete_acvp_v1_test_session(sessionId: str) -> Any:
 @router.get("/vectorSets/{vectorSetId}")
 def get_acvp_v1_vector_set(vectorSetId: str) -> Any:
     return get_vector_set(vectorSetId)
+
+
+@router.delete("/vectorSets/{vectorSetId}")
+def delete_acvp_v1_vector_set(vectorSetId: str) -> Any:
+    return cancel_vector_set(vectorSetId)
 
 
 @router.post("/vectorSets/{vectorSetId}/results")

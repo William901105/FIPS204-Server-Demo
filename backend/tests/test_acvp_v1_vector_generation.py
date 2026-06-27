@@ -169,7 +169,7 @@ def test_auto_generate_vector_sets_false_preserves_capabilities_accepted() -> No
     assert_skeleton_metadata(response)
     assert response["status"] == "capabilitiesAccepted"
     assert response["vectorSetIds"] == []
-    assert "Phase 3-4" in response["nextAction"]
+    assert "Phase 3-5" in response["nextAction"]
 
 
 def test_explicit_generate_endpoint() -> None:
