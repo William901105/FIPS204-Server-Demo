@@ -1,6 +1,6 @@
 # ACVP v1 Skeleton
 
-Phase 3-2 added a formal `/acvp/v1` namespace as a local skeleton. Phase 3-3 extends it with local ML-DSA registration/capabilities negotiation. It is not a production-ready ACVP server and every response includes:
+Phase 3-2 added a formal `/acvp/v1` namespace as a local skeleton. Phase 3-3 extended it with local ML-DSA registration/capabilities negotiation. Phase 3-4 adds deterministic local vector generation from negotiated capabilities. It is not a production-ready ACVP server and every response includes:
 
 ```json
 {
@@ -25,9 +25,10 @@ References:
 | GET | `/acvp/v1/version` | Returns local skeleton protocol/version metadata. |
 | GET | `/acvp/v1/algorithms` | Returns ML-DSA capability summary for the local implementation. |
 | GET | `/acvp/v1/testSessions` | Lists in-memory skeleton sessions. |
-| POST | `/acvp/v1/testSessions` | Creates a local prompt-based skeleton session or a Phase 3-3 registration/capabilities session. |
+| POST | `/acvp/v1/testSessions` | Creates a local prompt-based skeleton session or a registration session that can generate vector sets. |
 | GET | `/acvp/v1/testSessions/{sessionId}` | Returns skeleton session detail and vector set metadata. |
 | GET | `/acvp/v1/testSessions/{sessionId}/vectorSets` | Lists vector sets for a skeleton session; registration-only sessions return an empty list and Phase 3-4 next action. |
+| POST | `/acvp/v1/testSessions/{sessionId}/vectorSets/generate` | Generates vector sets for a capabilitiesAccepted session. |
 | GET | `/acvp/v1/vectorSets/{vectorSetId}` | Returns the local prompt/vector set. This is a skeleton convenience path, not a production claim. |
 | POST | `/acvp/v1/vectorSets/{vectorSetId}/results` | Validates a submitted response against generated expectedResults. |
 | GET | `/acvp/v1/vectorSets/{vectorSetId}/results` | Returns stored local validation result. |
@@ -82,7 +83,7 @@ Response shape:
 
 ## Registration Session Example
 
-Phase 3-3 accepts a local skeleton registration container:
+Phase 3-4 accepts a local skeleton registration container and generates vector sets by default:
 
 ```json
 {
@@ -94,7 +95,10 @@ Phase 3-3 accepts a local skeleton registration container:
       "parameterSets": ["ML-DSA-44", "ML-DSA-65"]
     }
   ],
-  "label": "phase 3-3 keyGen capabilities"
+  "label": "phase 3-4 keyGen vectors",
+  "campaignSeed": "00112233445566778899AABBCCDDEEFF",
+  "testsPerGroup": 2,
+  "autoGenerateVectorSets": true
 }
 ```
 
@@ -103,9 +107,9 @@ Response shape:
 ```json
 {
   "testSessionId": "uuid",
-  "status": "capabilitiesAccepted",
-  "vectorSetIds": [],
-  "vectorSetUrls": [],
+  "status": "vectorReady",
+  "vectorSetIds": ["uuid"],
+  "vectorSetUrls": ["/acvp/v1/vectorSets/uuid"],
   "negotiatedCapabilities": {
     "algorithm": "ML-DSA",
     "revision": "FIPS204",
@@ -113,7 +117,14 @@ Response shape:
     "unsupported": [],
     "warnings": []
   },
-  "nextAction": "Server-side vector generation from negotiated capabilities is planned for Phase 3-4.",
+  "vectorGeneration": {
+    "campaignSeed": "00112233445566778899AABBCCDDEEFF",
+    "testsPerGroup": 2,
+    "generatedVectorSetCount": 1,
+    "modes": ["keyGen"],
+    "generationProfile": "phase-3-4-deterministic-local",
+    "localSkeletonBehavior": true
+  },
   "productionReady": false,
   "profile": "local-fips204-skeleton",
   "demoOnly": true,
@@ -160,19 +171,17 @@ The response includes `validationResult` and `report` fields from the local vali
 
 ## Exclusions
 
-Phase 3-2 intentionally does not include:
+The skeleton intentionally does not include:
 
 - login/JWT
 - mTLS
 - DB persistence
-- server-side vector generation from capabilities
 - official production ACVP certification workflow
 - vendor/module/OE/dependency CRUD
 - async or large submission handling
 
 Planned follow-up phases:
 
-- Phase 3-4 vector generation
 - Phase 3-5 formal state machine
 - Phase 4-1 DB persistence
 - Phase 4-2 auth/JWT/mTLS

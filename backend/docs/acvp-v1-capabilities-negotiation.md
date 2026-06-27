@@ -1,6 +1,6 @@
 # ACVP v1 Capabilities Negotiation
 
-Phase 3-3 adds a local ML-DSA registration/capabilities negotiation layer for the `/acvp/v1` skeleton. It is based on the NIST ACVP Protocol Specification registration/capabilities exchange model and the NIST ACVP ML-DSA JSON Specification. It is still not a production-ready ACVP server.
+Phase 3-3 added a local ML-DSA registration/capabilities negotiation layer for the `/acvp/v1` skeleton. Phase 3-4 can use the negotiated plan to generate deterministic local vector sets. This remains based on the NIST ACVP Protocol Specification registration/capabilities exchange model and the NIST ACVP ML-DSA JSON Specification, and it is still not a production-ready ACVP server.
 
 References:
 
@@ -56,7 +56,7 @@ The current schema treats length domains as bit domains. `messageLength` must st
 - prompt-based Phase 3-2 sessions with `prompt`
 - registration/capabilities Phase 3-3 sessions with `algorithms`
 
-For a registration container, the server creates an in-memory session with:
+With `autoGenerateVectorSets=false`, the server creates an in-memory capabilities-only session with:
 
 ```json
 {
@@ -70,15 +70,15 @@ For a registration container, the server creates an in-memory session with:
     "unsupported": [],
     "warnings": []
   },
-  "nextAction": "Server-side vector generation from negotiated capabilities is planned for Phase 3-4."
+  "nextAction": "Server-side vector generation from negotiated capabilities is available in Phase 3-4; enable autoGenerateVectorSets or call /vectorSets/generate."
 }
 ```
 
-Phase 3-3 does not create prompts or vector sets from capabilities. `GET /acvp/v1/testSessions/{sessionId}/vectorSets` returns an empty list for capabilities-only sessions. `GET /acvp/v1/testSessions/{sessionId}/results` returns `409 VECTOR_SETS_NOT_GENERATED` until Phase 3-4 vector generation exists.
+By default in Phase 3-4, registration sessions use `autoGenerateVectorSets=true` and become `vectorReady`. Capabilities-only sessions still return an empty vector set list until the explicit generation endpoint is called.
 
 ## SHAKE Handling
 
-The ML-DSA schema constants include `SHAKE-128` and `SHAKE-256`, so those names may validate in `hashAlgs`. The local expectedResults/vector generation path does not generate SHAKE preHash cases because the current API does not represent SHAKE output length behavior. Phase 3-3 therefore excludes SHAKE values from negotiated generated hash algorithms and returns a warning/unsupported entry when at least one non-SHAKE generated hash remains.
+The ML-DSA schema constants include `SHAKE-128` and `SHAKE-256`, so those names may validate in `hashAlgs`. The local expectedResults/vector generation path does not generate SHAKE preHash cases because the current API does not represent SHAKE output length behavior. Phase 3-4 excludes SHAKE values from generated hash algorithm groups and returns a warning/unsupported entry when at least one non-SHAKE generated hash remains.
 
 If a registration requests only unsupported generated hash capabilities, the skeleton returns:
 
@@ -96,11 +96,10 @@ If a registration requests only unsupported generated hash capabilities, the ske
 
 Phase 3-3 intentionally does not include:
 
-- server-side vector generation from capabilities
 - formal random vector generation
 - DB persistence
 - JWT/login/mTLS
 - vendor/module/OE/dependency resources
 - production ACVP certification workflow
 
-Next phase: Phase 3-4 vector generation from negotiated capabilities.
+Next phase: Phase 3-5 formal testSession/vectorSet state machine.

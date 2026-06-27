@@ -4,6 +4,9 @@ from pathlib import Path
 
 
 DOC = Path(__file__).resolve().parents[1] / "docs" / "acvp-conformance-matrix.md"
+VECTOR_GENERATION_DOC = (
+    Path(__file__).resolve().parents[1] / "docs" / "acvp-v1-vector-generation.md"
+)
 
 
 def test_acvp_conformance_matrix_exists_and_references_nist_sources() -> None:
@@ -36,7 +39,7 @@ def test_acvp_conformance_matrix_declares_demo_and_skeleton_not_production() -> 
     assert "`/api/demo/acvp/...` routes are a local demo lifecycle" in text
     assert "not formal ACVP endpoints" in text
     assert "`/acvp/v1/...` routes are skeleton endpoints" in text
-    assert "Phase 3-3 registration negotiation is local-fips204-skeleton behavior" in text
+    assert "Phase 3-4 vector generation is deterministic local-fips204-skeleton behavior" in text
     assert "not a production-ready server" in text
 
 
@@ -52,3 +55,15 @@ def test_acvp_conformance_matrix_lists_required_future_phases() -> None:
         "Phase 4-2",
     ):
         assert phase in text
+
+
+def test_acvp_v1_vector_generation_doc_exists_and_documents_scope() -> None:
+    assert VECTOR_GENERATION_DOC.exists()
+    text = VECTOR_GENERATION_DOC.read_text(encoding="utf-8")
+
+    assert "Phase 3-4" in text
+    assert "campaignSeed" in text
+    assert "testsPerGroup" in text
+    assert "POST /acvp/v1/testSessions/{sessionId}/vectorSets/generate" in text
+    assert "not a production-ready ACVP server" in text
+    assert "SHAKE-128" in text

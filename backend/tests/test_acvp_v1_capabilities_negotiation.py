@@ -51,6 +51,7 @@ def test_keygen_registration_accepted() -> None:
         {
             "algorithms": [keygen_registration()],
             "label": "keygen capabilities",
+            "autoGenerateVectorSets": False,
         }
     )
 
@@ -68,6 +69,7 @@ def test_siggen_internal_external_registration_accepted() -> None:
         {
             "algorithms": [siggen_registration()],
             "label": "sigGen capabilities",
+            "autoGenerateVectorSets": False,
         }
     )
 
@@ -90,6 +92,7 @@ def test_sigver_registration_accepted() -> None:
         {
             "algorithms": [sigver_registration()],
             "label": "sigVer capabilities",
+            "autoGenerateVectorSets": False,
         }
     )
 
@@ -111,6 +114,7 @@ def test_multiple_algorithms_accepted() -> None:
                 sigver_registration(),
             ],
             "label": "all modes",
+            "autoGenerateVectorSets": False,
         }
     )
 
@@ -123,7 +127,9 @@ def test_unsupported_parameter_set_rejected_by_schema() -> None:
     registration = keygen_registration()
     registration["parameterSets"] = ["BAD-SET"]
 
-    response = create_acvp_v1_test_session({"algorithms": [registration]})
+    response = create_acvp_v1_test_session(
+        {"algorithms": [registration], "autoGenerateVectorSets": False}
+    )
 
     assert_json_response(response, 400)
     body = body_of(response)
@@ -228,7 +234,9 @@ def test_prompt_based_phase_3_2_flow_still_works() -> None:
 
 
 def test_capabilities_only_session_vector_sets_endpoint_returns_empty_list() -> None:
-    created = create_acvp_v1_test_session({"algorithms": [siggen_registration()]})
+    created = create_acvp_v1_test_session(
+        {"algorithms": [siggen_registration()], "autoGenerateVectorSets": False}
+    )
     session_id = created["testSessionId"]
 
     detail = get_acvp_v1_test_session(session_id)
@@ -246,7 +254,9 @@ def test_capabilities_only_session_vector_sets_endpoint_returns_empty_list() -> 
 
 
 def test_capabilities_only_session_results_returns_409_before_vector_generation() -> None:
-    created = create_acvp_v1_test_session({"algorithms": [sigver_registration()]})
+    created = create_acvp_v1_test_session(
+        {"algorithms": [sigver_registration()], "autoGenerateVectorSets": False}
+    )
     response = get_acvp_v1_test_session_results(created["testSessionId"])
 
     assert_json_response(response, 409)

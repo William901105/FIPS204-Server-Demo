@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from ..models import (
     AcvpV1TestSessionCreateRequest,
+    AcvpV1VectorSetGenerateRequest,
     AcvpV1VectorSetResultsSubmitRequest,
 )
 from .service import (
@@ -15,6 +16,7 @@ from .service import (
     algorithms,
     create_test_session,
     delete_test_session,
+    generate_vector_sets_for_session,
     get_test_session,
     get_test_session_results,
     get_test_session_vector_sets,
@@ -61,6 +63,17 @@ def get_acvp_v1_test_session(sessionId: str) -> Any:
 @router.get("/testSessions/{sessionId}/vectorSets")
 def get_acvp_v1_test_session_vector_sets(sessionId: str) -> Any:
     return get_test_session_vector_sets(sessionId)
+
+
+@router.post("/testSessions/{sessionId}/vectorSets/generate")
+def generate_acvp_v1_test_session_vector_sets(
+    sessionId: str,
+    payload: Any = Body(default=None),
+) -> Any:
+    request = _parse_vector_set_generate_request(payload)
+    if isinstance(request, JSONResponse):
+        return request
+    return generate_vector_sets_for_session(sessionId, request)
 
 
 @router.get("/testSessions/{sessionId}/results")
@@ -147,6 +160,22 @@ def _parse_results_submit_request(payload: Any) -> Any:
             "INVALID_REQUEST",
             _validation_error_message(exc),
             "$.response",
+        )
+
+
+def _parse_vector_set_generate_request(payload: Any) -> Any:
+    if isinstance(payload, AcvpV1VectorSetGenerateRequest):
+        return payload
+    if payload is None:
+        payload = {}
+    try:
+        return AcvpV1VectorSetGenerateRequest.model_validate(payload)
+    except ValidationError as exc:
+        return acvp_skeleton_error(
+            400,
+            "INVALID_REQUEST",
+            _validation_error_message(exc),
+            "$",
         )
 
 

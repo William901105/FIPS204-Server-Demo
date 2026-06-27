@@ -67,7 +67,15 @@ class AcvpV1TestSessionCreateRequest(BaseModel):
     algorithms: Optional[List[JsonObject]] = None
     label: Optional[str] = None
     autoGenerateExpectedResults: bool = True
+    autoGenerateVectorSets: bool = True
+    campaignSeed: Optional[str] = None
+    testsPerGroup: Optional[int] = None
     metadata: Optional[JsonObject] = None
+
+
+class AcvpV1VectorSetGenerateRequest(BaseModel):
+    campaignSeed: Optional[str] = None
+    testsPerGroup: Optional[int] = None
 
 
 class AcvpV1VectorSetResultsSubmitRequest(BaseModel):
