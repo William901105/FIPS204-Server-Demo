@@ -71,6 +71,7 @@ class AcvpV1TestSessionCreateRequest(BaseModel):
     campaignSeed: Optional[str] = None
     testsPerGroup: Optional[int] = None
     generationProfile: Optional[str] = None
+    isSample: Optional[bool] = None
     expiresInSeconds: Optional[int] = Field(default=None, ge=0)
     metadata: Optional[JsonObject] = None
 

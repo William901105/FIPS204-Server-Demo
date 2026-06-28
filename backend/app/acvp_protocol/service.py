@@ -44,6 +44,11 @@ from .state_machine import (
     transition_vector_set,
     vector_set_is_expired,
 )
+from .workflow_profile import (
+    LOCAL_WORKFLOW_PROFILE,
+    STRICT_WORKFLOW_PROFILE,
+    is_strict_workflow,
+)
 
 ensure_mldsa_provider_registered()
 
@@ -488,7 +493,11 @@ def list_test_sessions(
     )
 
 
-def create_test_session(payload: AcvpV1TestSessionCreateRequest) -> Any:
+def create_test_session(
+    payload: AcvpV1TestSessionCreateRequest,
+    *,
+    workflow_profile: str = LOCAL_WORKFLOW_PROFILE,
+) -> Any:
     if payload.prompt is not None and payload.algorithms is not None:
         return acvp_skeleton_error(
             400,
@@ -497,7 +506,7 @@ def create_test_session(payload: AcvpV1TestSessionCreateRequest) -> Any:
             "$",
         )
     if payload.algorithms is not None:
-        return _create_registration_session(payload)
+        return _create_registration_session(payload, workflow_profile=workflow_profile)
     if payload.prompt is None:
         return acvp_skeleton_error(
             400,
@@ -506,12 +515,14 @@ def create_test_session(payload: AcvpV1TestSessionCreateRequest) -> Any:
             "$",
         )
 
+    is_sample = _resolve_is_sample(payload.isSample, workflow_profile)
+    prompt = _payload_with_is_sample(payload.prompt, is_sample)
     try:
-        provider = _provider_for_prompt(payload.prompt)
-        prompt_vs = provider.validate_prompt(payload.prompt)
+        provider = _provider_for_prompt(prompt)
+        prompt_vs = provider.validate_prompt(prompt)
         expected_results = None
         if payload.autoGenerateExpectedResults:
-            expected_results = provider.generate_expected_results(payload.prompt)
+            expected_results = provider.generate_expected_results(prompt)
             provider.validate_response(expected_results, expected_mode=prompt_vs["mode"])
     except AcvpSchemaError as exc:
         return acvp_skeleton_error(400, exc.code, exc.message, exc.path)
@@ -535,6 +546,8 @@ def create_test_session(payload: AcvpV1TestSessionCreateRequest) -> Any:
         "expiresAt": expires_at,
         "vectorSetIds": [vector_set_id],
         "vectorSetUrls": [vector_set_url],
+        "workflowProfile": workflow_profile,
+        "isSample": is_sample,
         **SKELETON_METADATA,
     }
     vector_set = {
@@ -544,13 +557,14 @@ def create_test_session(payload: AcvpV1TestSessionCreateRequest) -> Any:
         "updatedAt": now,
         "status": VectorSetStatus.CREATED.value,
         "expiresAt": expires_at,
-        "prompt": payload.prompt,
+        "prompt": prompt,
         "expectedResults": expected_results,
         "response": None,
         "validationResult": None,
         "report": None,
         "mode": prompt_vs["mode"],
         "vsId": prompt_vs["vsId"],
+        "isSample": is_sample,
         **SKELETON_METADATA,
     }
     _record_created(session, TestSessionStatus.CREATED.value, "Prompt-based test session created.")
@@ -576,6 +590,7 @@ def create_test_session(payload: AcvpV1TestSessionCreateRequest) -> Any:
             "label": payload.label,
             "vectorSetUrls": [vector_set_url],
             "vectorSetIds": [vector_set_id],
+            "isSample": is_sample,
             "createdAt": now,
             "updatedAt": session["updatedAt"],
             "expiresAt": expires_at,
@@ -584,7 +599,11 @@ def create_test_session(payload: AcvpV1TestSessionCreateRequest) -> Any:
     )
 
 
-def _create_registration_session(payload: AcvpV1TestSessionCreateRequest) -> Any:
+def _create_registration_session(
+    payload: AcvpV1TestSessionCreateRequest,
+    *,
+    workflow_profile: str,
+) -> Any:
     try:
         container_payload: Dict[str, Any] = {"algorithms": payload.algorithms}
         if payload.label is not None:
@@ -614,6 +633,7 @@ def _create_registration_session(payload: AcvpV1TestSessionCreateRequest) -> Any
     now = _timestamp()
     session_id = str(uuid4())
     expires_at = _expires_at_from_seconds(payload.expiresInSeconds)
+    is_sample = _resolve_is_sample(payload.isSample, workflow_profile)
     session = {
         "testSessionId": session_id,
         "createdAt": now,
@@ -628,6 +648,8 @@ def _create_registration_session(payload: AcvpV1TestSessionCreateRequest) -> Any
         "campaignSeed": campaign_seed,
         "testsPerGroup": tests_per_group,
         "generationProfile": generation_profile,
+        "workflowProfile": workflow_profile,
+        "isSample": is_sample,
         "vectorSetIds": [],
         "vectorSetUrls": [],
         "nextAction": VECTOR_GENERATION_AVAILABLE_ACTION,
@@ -648,6 +670,7 @@ def _create_registration_session(payload: AcvpV1TestSessionCreateRequest) -> Any
             tests_per_group=tests_per_group,
             generation_profile=generation_profile,
             expires_at=expires_at,
+            is_sample=is_sample,
             reason="Registration requested autoGenerateVectorSets.",
         )
         if isinstance(generated, JSONResponse):
@@ -719,6 +742,7 @@ def generate_vector_sets_for_session(
         tests_per_group=tests_per_group,
         generation_profile=generation_profile,
         expires_at=_expires_at_from_seconds(payload.expiresInSeconds) or session.get("expiresAt"),
+        is_sample=_vector_set_session_is_sample(session),
         reason="Explicit vector generation endpoint called.",
     )
     if isinstance(generated, JSONResponse):
@@ -742,6 +766,7 @@ def _registration_session_response(session: Dict[str, Any]) -> Dict[str, Any]:
         "campaignSeed": session.get("campaignSeed"),
         "testsPerGroup": session.get("testsPerGroup"),
         "generationProfile": session.get("generationProfile"),
+        "isSample": session.get("isSample"),
         "stateHistory": list(session.get("stateHistory", [])),
     }
     if "vectorGeneration" in session:
@@ -758,6 +783,7 @@ def _generate_and_store_vector_sets(
     tests_per_group: int,
     generation_profile: str,
     expires_at: Optional[str],
+    is_sample: bool,
     reason: str,
 ) -> Optional[JSONResponse]:
     try:
@@ -772,6 +798,7 @@ def _generate_and_store_vector_sets(
             prompts,
             campaign_seed,
             generation_profile,
+            is_sample,
         )
     except AcvpSchemaError as exc:
         return acvp_skeleton_error(500, exc.code, exc.message, exc.path)
@@ -857,9 +884,11 @@ def _prepare_generated_vector_sets(
     prompts: List[Dict[str, Any]],
     campaign_seed: str,
     generation_profile: str,
+    is_sample: bool,
 ) -> List[Dict[str, Any]]:
     prepared: List[Dict[str, Any]] = []
-    for prompt in prompts:
+    for raw_prompt in prompts:
+        prompt = _payload_with_is_sample(raw_prompt, is_sample)
         provider = _provider_for_prompt(prompt)
         prompt_vs = provider.validate_prompt(prompt)
         expected_results = provider.generate_expected_results(prompt)
@@ -880,6 +909,7 @@ def _prepare_generated_vector_sets(
                 "vsId": prompt_vs["vsId"],
                 "campaignSeed": campaign_seed,
                 "generationProfile": generation_profile,
+                "isSample": is_sample,
                 **SKELETON_METADATA,
             }
         )
@@ -991,6 +1021,51 @@ def _generation_profile_minimums(
     return {}
 
 
+def _resolve_is_sample(value: Optional[bool], workflow_profile: str) -> bool:
+    if value is not None:
+        return bool(value)
+    return not is_strict_workflow(workflow_profile)
+
+
+def _payload_with_is_sample(payload: Any, is_sample: bool) -> Any:
+    if isinstance(payload, dict):
+        result = dict(payload)
+        result["isSample"] = is_sample
+        return result
+    if isinstance(payload, list):
+        result = []
+        applied = False
+        for item in payload:
+            if isinstance(item, dict) and not applied and (
+                "testGroups" in item
+                or {"vsId", "algorithm", "mode", "revision"}.intersection(item)
+            ):
+                updated = dict(item)
+                updated["isSample"] = is_sample
+                result.append(updated)
+                applied = True
+            else:
+                result.append(item)
+        return result
+    return payload
+
+
+def _vector_set_is_sample(vector_set: Dict[str, Any]) -> bool:
+    if isinstance(vector_set.get("isSample"), bool):
+        return bool(vector_set["isSample"])
+    try:
+        prompt = normalize_acvp_json(vector_set.get("prompt"))
+    except Exception:
+        prompt = {}
+    value = prompt.get("isSample")
+    return bool(value) if isinstance(value, bool) else True
+
+
+def _vector_set_session_is_sample(session: Dict[str, Any]) -> bool:
+    value = session.get("isSample")
+    return bool(value) if isinstance(value, bool) else True
+
+
 def get_test_session(session_id: str) -> Any:
     session = _get_session(session_id)
     if isinstance(session, JSONResponse):
@@ -1060,27 +1135,39 @@ def get_test_session_vector_sets(
     return with_skeleton_metadata(body)
 
 
-def get_vector_set(vector_set_id: str) -> Any:
+def get_vector_set(
+    vector_set_id: str,
+    *,
+    workflow_profile: str = LOCAL_WORKFLOW_PROFILE,
+) -> Any:
     vector_set = get_vector_set_or_404(vector_set_id)
     if isinstance(vector_set, JSONResponse):
         return vector_set
     path = f"/acvp/v1/vectorSets/{vector_set_id}"
-    return _get_vector_set_prompt_response(vector_set, path)
+    return _get_vector_set_prompt_response(vector_set, path, workflow_profile=workflow_profile)
 
 
-def get_vector_set_prompt(session_id: str, vector_set_id: str) -> Any:
+def get_vector_set_prompt(
+    session_id: str,
+    vector_set_id: str,
+    *,
+    workflow_profile: str = LOCAL_WORKFLOW_PROFILE,
+) -> Any:
     vector_set = get_vector_set_for_session_or_404(session_id, vector_set_id)
     if isinstance(vector_set, JSONResponse):
         return vector_set
     return _get_vector_set_prompt_response(
         vector_set,
         _nested_vector_set_path(session_id, vector_set_id),
+        workflow_profile=workflow_profile,
     )
 
 
 def _get_vector_set_prompt_response(
     vector_set: Dict[str, Any],
     path: str,
+    *,
+    workflow_profile: str,
 ) -> Any:
     unavailable = _reject_if_vector_unavailable(vector_set, path)
     if isinstance(unavailable, JSONResponse):
@@ -1103,6 +1190,9 @@ def _get_vector_set_prompt_response(
         save_acvp_vector_set(vector_set)
         _mark_session_downloaded_if_complete(vector_set["testSessionId"])
 
+    if is_strict_workflow(workflow_profile):
+        return vector_set["prompt"]
+
     return with_skeleton_metadata(
         {
             "vectorSetId": vector_set["vectorSetId"],
@@ -1112,6 +1202,7 @@ def _get_vector_set_prompt_response(
             "generatedFromCapabilities": vector_set.get("generatedFromCapabilities", False),
             "generationProfile": vector_set.get("generationProfile"),
             "campaignSeed": vector_set.get("campaignSeed"),
+            "isSample": _vector_set_is_sample(vector_set),
             "downloadedAt": vector_set.get("downloadedAt"),
             "expiresAt": vector_set.get("expiresAt"),
             "stateHistory": list(vector_set.get("stateHistory", [])),
@@ -1119,27 +1210,43 @@ def _get_vector_set_prompt_response(
     )
 
 
-def get_vector_set_expected_results(vector_set_id: str) -> Any:
+def get_vector_set_expected_results(
+    vector_set_id: str,
+    *,
+    workflow_profile: str = LOCAL_WORKFLOW_PROFILE,
+) -> Any:
     vector_set = get_vector_set_or_404(vector_set_id)
     if isinstance(vector_set, JSONResponse):
         return vector_set
     path = f"/acvp/v1/vectorSets/{vector_set_id}/expectedResults"
-    return _get_vector_set_expected_response(vector_set, path)
+    return _get_vector_set_expected_response(
+        vector_set,
+        path,
+        workflow_profile=workflow_profile,
+    )
 
 
-def get_vector_set_expected(session_id: str, vector_set_id: str) -> Any:
+def get_vector_set_expected(
+    session_id: str,
+    vector_set_id: str,
+    *,
+    workflow_profile: str = LOCAL_WORKFLOW_PROFILE,
+) -> Any:
     vector_set = get_vector_set_for_session_or_404(session_id, vector_set_id)
     if isinstance(vector_set, JSONResponse):
         return vector_set
     return _get_vector_set_expected_response(
         vector_set,
         f"{_nested_vector_set_path(session_id, vector_set_id)}/expected",
+        workflow_profile=workflow_profile,
     )
 
 
 def _get_vector_set_expected_response(
     vector_set: Dict[str, Any],
     path: str,
+    *,
+    workflow_profile: str,
 ) -> Any:
     unavailable = _reject_if_vector_unavailable(vector_set, path)
     if isinstance(unavailable, JSONResponse):
@@ -1152,12 +1259,23 @@ def _get_vector_set_expected_response(
             path,
         )
 
+    if is_strict_workflow(workflow_profile):
+        if not _vector_set_is_sample(vector_set):
+            return acvp_skeleton_error(
+                403,
+                "EXPECTED_RESULTS_NOT_AVAILABLE_FOR_NON_SAMPLE",
+                "Expected results are not downloadable for non-sample vector sets.",
+                path,
+            )
+        return vector_set["expectedResults"]
+
     return with_skeleton_metadata(
         {
             "vectorSetId": vector_set["vectorSetId"],
             "testSessionId": vector_set["testSessionId"],
             "expectedResults": vector_set["expectedResults"],
             "status": vector_set["status"],
+            "isSample": _vector_set_is_sample(vector_set),
             "expiresAt": vector_set.get("expiresAt"),
             "localSkeletonExpectedEndpoint": True,
         }
@@ -1171,6 +1289,7 @@ def submit_vector_set_results(
     *,
     show_expected: bool = False,
     update: bool = False,
+    workflow_profile: str = LOCAL_WORKFLOW_PROFILE,
 ) -> Any:
     if session_id is None:
         vector_set = get_vector_set_or_404(vector_set_id)
@@ -1287,6 +1406,11 @@ def submit_vector_set_results(
     vector_set["acvpResults"] = acvp_results
     save_acvp_vector_set(vector_set)
 
+    if is_strict_workflow(workflow_profile):
+        from fastapi import Response
+
+        return Response(status_code=204)
+
     return _vector_set_results_response(
         vector_set,
         acvp_results,
@@ -1298,7 +1422,13 @@ def submit_vector_set_results(
     )
 
 
-def get_vector_set_results(session_id: Optional[str], vector_set_id: str) -> Any:
+def get_vector_set_results(
+    session_id: Optional[str],
+    vector_set_id: str,
+    *,
+    workflow_profile: str = LOCAL_WORKFLOW_PROFILE,
+    show_expected: bool = False,
+) -> Any:
     if session_id is None:
         vector_set = get_vector_set_or_404(vector_set_id)
         path = f"/acvp/v1/vectorSets/{vector_set_id}/results"
@@ -1310,7 +1440,24 @@ def get_vector_set_results(session_id: Optional[str], vector_set_id: str) -> Any
     unavailable = _reject_if_vector_unavailable(vector_set, path)
     if isinstance(unavailable, JSONResponse):
         return unavailable
+    if is_strict_workflow(workflow_profile) and show_expected and not _vector_set_is_sample(vector_set):
+        return acvp_skeleton_error(
+            403,
+            "SHOW_EXPECTED_NOT_AVAILABLE_FOR_NON_SAMPLE",
+            "showExpected is not available for strict non-sample vector sets.",
+            path,
+        )
+
     acvp_results = vector_set.get("acvpResults")
+    if is_strict_workflow(workflow_profile):
+        return build_acvp_vector_set_results(
+            vector_set=vector_set,
+            validation_result=vector_set.get("validationResult"),
+            response=vector_set.get("response"),
+            expected_results=vector_set.get("expectedResults"),
+            show_expected=bool(show_expected),
+        )
+
     if not isinstance(acvp_results, dict):
         acvp_results = build_acvp_vector_set_results(
             vector_set=vector_set,
@@ -1330,7 +1477,11 @@ def get_vector_set_results(session_id: Optional[str], vector_set_id: str) -> Any
     )
 
 
-def get_test_session_results(session_id: str) -> Any:
+def get_test_session_results(
+    session_id: str,
+    *,
+    workflow_profile: str = LOCAL_WORKFLOW_PROFILE,
+) -> Any:
     session = _get_session(session_id)
     if isinstance(session, JSONResponse):
         return session
@@ -1345,6 +1496,9 @@ def get_test_session_results(session_id: str) -> Any:
             "This registration session has no vector sets yet. Generate vector sets before requesting results.",
             path,
         )
+
+    if is_strict_workflow(workflow_profile):
+        return _strict_test_session_results(session)
 
     vector_results = []
     for vector_set_id in session["vectorSetIds"]:
@@ -1377,6 +1531,39 @@ def get_test_session_results(session_id: str) -> Any:
             "stateHistory": list(session.get("stateHistory", [])),
         }
     )
+
+
+def _strict_test_session_results(session: Dict[str, Any]) -> Dict[str, Any]:
+    results = []
+    all_passed = bool(session.get("vectorSetIds"))
+    for vector_set_id in session.get("vectorSetIds", []):
+        vector_set = get_acvp_vector_set(vector_set_id)
+        if vector_set is None:
+            disposition = "unreceived"
+        else:
+            acvp_results = build_acvp_vector_set_results(
+                vector_set=vector_set,
+                validation_result=vector_set.get("validationResult"),
+                response=vector_set.get("response"),
+                expected_results=vector_set.get("expectedResults"),
+                show_expected=False,
+            )
+            disposition = str(
+                acvp_results.get("results", {}).get("disposition", "unreceived")
+            )
+        all_passed = all_passed and disposition == "passed"
+        results.append(
+            {
+                "vectorSetUrl": _nested_vector_set_path(session["testSessionId"], vector_set_id),
+                "status": disposition,
+                "disposition": disposition,
+            }
+        )
+
+    return {
+        "passed": all_passed,
+        "results": results,
+    }
 
 
 def submit_test_session_for_validation(session_id: str) -> Any:
