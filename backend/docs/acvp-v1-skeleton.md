@@ -2,12 +2,13 @@
 
 Phase 3-2 added a formal `/acvp/v1` namespace as a local skeleton. Phase 3-3 through Phase 3-5 added local ML-DSA capabilities negotiation, deterministic vector generation, and a local test session/vector set state machine. Phase 4-1 stores sessions, vector sets, submissions, validation results, reports, and state events in SQLite.
 
-Phase 4-3 Commit 1 adds the first protocol hardening pass:
+Phase 4-3 adds protocol hardening:
 
 - NIST canonical nested vector set routes under `/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}`.
 - ACVP array envelope responses for canonical `/acvp/v1` routes.
 - Local skeleton metadata moved under `extensions.localFips204Skeleton`.
 - Existing flat vector set routes retained as local compatibility aliases.
+- Commit 2 maps internal vector set validation into a NIST-like `results` object and adds `showExpected` support.
 
 This remains a local skeleton, not a production-ready ACVP server. `/acvp/v1` still reports `productionReady=false`.
 
@@ -23,6 +24,8 @@ References:
 The NIST ACVP Protocol Specification is the protocol authority for URI hierarchy, message envelope, workflow, paging, and errors. The NIST ACVP ML-DSA JSON Specification is the algorithm JSON authority. The usnistgov/ACVP-Server repository is useful implementation/gen-val reference material, but it does not override the protocol specification when behavior differs.
 
 For Phase 4-3 Commit 1, the prompt matched the NIST protocol on the important vector set route shape: vector set download, results, update, cancellation, and expected result retrieval are nested below `testSessions/{testSessionId}`. The prompt also correctly called out that the NIST expected result path uses `/expected`, not the old local `/expectedResults` alias.
+
+For Phase 4-3 Commit 2, the implementation follows the NIST result object fields and the enumerated `fail` value. The NIST text also states POST result submission may return no content; this skeleton returns envelope results for developer usability and marks that local behavior in `extensions.localFips204Skeleton`.
 
 ## ACVP Envelope
 
@@ -63,9 +66,9 @@ For debugging, canonical routes accept `profile=debug` or `includeLocalMetadata=
 | POST | `/acvp/v1/testSessions/{sessionId}/vectorSets/generate` | Local skeleton helper that generates vector sets for a `capabilitiesAccepted` session. |
 | GET | `/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}` | NIST canonical nested vector set download. Marks `ready` vector sets as `downloaded`. |
 | DELETE | `/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}` | NIST canonical nested vector set cancellation. Soft-cancels the vector set and records state events. |
-| POST | `/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}/results` | NIST canonical nested result submission. Stores response, validation result, and report. |
-| PUT | `/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}/results` | Local skeleton replace/update behavior for an existing result submission. |
-| GET | `/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}/results` | Returns stored local validation result and report. Full disposition adapter remains Phase 4-3C. |
+| POST | `/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}/results` | NIST canonical nested result submission. Accepts local wrapper, raw response body, or ACVP array envelope; stores response, `showExpected`, local validation artifacts, and ACVP-style `results`. Returns local envelope results instead of production no-content. |
+| PUT | `/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}/results` | Local skeleton replace/update behavior for an existing result submission; updates stored `showExpected` and `acvpResults`. |
+| GET | `/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}/results` | Returns ACVP envelope with `{"results": {"vsId", "disposition", "tests"}}`; local validationResult/report are not top-level fields. |
 | GET | `/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}/expected` | NIST canonical expected result route name. In this local skeleton it returns generated `expectedResults`; production behavior still requires NIST workflow compliance. |
 | GET | `/acvp/v1/testSessions/{sessionId}/results` | Aggregates local vector set results. |
 | POST | `/acvp/v1/testSessions/{sessionId}/submit` | Local skeleton session-level submit-for-validation aggregate finalization. |
@@ -85,6 +88,45 @@ The older flat vector set routes remain available for local compatibility:
 
 Flat aliases are not the canonical NIST URI shape. New protocol-facing clients should use the nested `testSessions/{sessionId}/vectorSets/{vectorSetId}` routes.
 
+## Vector Set Results
+
+Canonical vector set results use this shape:
+
+```json
+[
+  {"acvVersion": "1.0"},
+  {
+    "results": {
+      "vsId": 43201,
+      "disposition": "fail",
+      "tests": [
+        {
+          "tcId": 1,
+          "result": "fail",
+          "reason": "value mismatch"
+        }
+      ]
+    }
+  }
+]
+```
+
+The local skeleton maps internal validator statuses to ACVP results as follows:
+
+| Internal condition | Overall disposition | Per-test result |
+| --- | --- | --- |
+| all expected tests pass | `passed` | `passed` |
+| value mismatch, malformed case, or extra response case | `fail` | `fail` |
+| missing response case only | `missing` | `missing` |
+| no response received | `unreceived` | `unreceived` |
+| expired vector set | `expired` | `expired` |
+| not all cases processed | `incomplete` | `incomplete` |
+| local adapter/validation error | `error` | `incomplete` |
+
+`showExpected=true` can be supplied in either `{"response": ..., "showExpected": true}` or the second object of an ACVP array envelope. The flag is removed before ML-DSA schema validation, persisted on the vector set, and used for later `GET /results`. When true, non-passing tests include `expected` and `provided` objects where available. When false, those objects are omitted.
+
+The old local `validationResult` and `report` remain persisted for debug/local flows and flat compatibility aliases, but canonical GET results no longer returns them at top level.
+
 ## State And Persistence
 
 Nested routes enforce session/vector set ownership. If a vector set does not belong to the supplied session, the local skeleton returns `404 UNKNOWN_VECTOR_SET` to avoid revealing vector set existence across sessions.
@@ -95,7 +137,6 @@ The default SQLite path remains `backend/data/acvp.sqlite3`; set `ACVP_DB_PATH=/
 
 ## Remaining Deviations
 
-- Results disposition adapter remains Phase 4-3C.
 - Paging/query hardening remains Phase 4-3D.
 - Error normalization remains Phase 4-3E.
 - Authentication, JWT, and mTLS remain Phase 4-2.

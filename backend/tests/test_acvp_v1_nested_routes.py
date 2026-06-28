@@ -54,9 +54,12 @@ def test_nested_vector_set_download_expected_submit_and_get_results() -> None:
     assert vector["prompt"]["mode"] == "keyGen"
     assert expected["expectedResults"]["mode"] == "keyGen"
     assert expected["localSkeletonExpectedEndpoint"] is True
-    assert submitted["validationResult"]["summary"]["failed"] == 0
-    assert submitted["validationResult"]["summary"]["passed"] == 1
-    assert results["validationResult"]["summary"]["passed"] == 1
+    assert submitted["results"]["disposition"] == "passed"
+    assert submitted["results"]["tests"][0]["result"] == "passed"
+    assert results["results"]["disposition"] == "passed"
+    assert results["results"]["tests"][0]["result"] == "passed"
+    assert "validationResult" not in submitted
+    assert "validationResult" not in results
     assert "productionReady" not in submitted
     assert submitted["extensions"]["localFips204Skeleton"]["productionReady"] is False
 
@@ -100,11 +103,12 @@ def test_nested_put_results_replaces_previous_submission() -> None:
         get_acvp_v1_test_session_vector_set_results(session_id, vector_set_id)
     )
 
-    assert failed["validationResult"]["summary"]["failed"] == 1
-    assert updated["submissionAction"] == "updated"
-    assert updated["localSkeletonPutReplaceBehavior"] is True
-    assert updated["validationResult"]["summary"]["failed"] == 0
-    assert results["validationResult"]["summary"]["passed"] == 1
+    assert failed["results"]["disposition"] == "fail"
+    assert updated["results"]["disposition"] == "passed"
+    assert updated["extensions"]["localFips204Skeleton"]["submissionAction"] == "updated"
+    assert updated["extensions"]["localFips204Skeleton"]["localPutReplaceBehavior"] is True
+    assert updated["results"]["tests"][0]["result"] == "passed"
+    assert results["results"]["disposition"] == "passed"
 
 
 def test_nested_delete_cancels_vector_set_and_blocks_submit() -> None:

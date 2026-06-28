@@ -80,7 +80,10 @@ def test_acvp_v1_protocol_hardening_doc_exists_and_documents_phase_4_3() -> None
     text = PROTOCOL_HARDENING_DOC.read_text(encoding="utf-8")
 
     assert "Phase 4-3 Commit 1" in text
+    assert "Phase 4-3 Commit 2" in text
     assert "/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}/expected" in text
     assert "extensions.localFips204Skeleton" in text
     assert "localCompatibilityAlias=true" in text
-    assert "Results disposition adapter remains Phase 4-3C" in text
+    assert "results.disposition" in text
+    assert "showExpected" in text
+    assert "localPostReturnsResults=true" in text

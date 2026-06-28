@@ -178,15 +178,20 @@ def submit_acvp_v1_test_session_vector_set_results(
     profile: Optional[str] = None,
     includeLocalMetadata: bool = False,
 ) -> Any:
-    request = _parse_results_submit_request(payload)
-    if isinstance(request, JSONResponse):
+    submission = parse_acvp_results_submission_payload(payload)
+    if isinstance(submission, JSONResponse):
         return _canonical_response(
-            request,
+            submission,
             profile=profile,
             include_local_metadata=includeLocalMetadata,
         )
     return _canonical_response(
-        submit_vector_set_results(sessionId, vectorSetId, request.response),
+        submit_vector_set_results(
+            sessionId,
+            vectorSetId,
+            submission["response"],
+            show_expected=submission["showExpected"],
+        ),
         profile=profile,
         include_local_metadata=includeLocalMetadata,
     )
@@ -200,15 +205,21 @@ def update_acvp_v1_test_session_vector_set_results(
     profile: Optional[str] = None,
     includeLocalMetadata: bool = False,
 ) -> Any:
-    request = _parse_results_submit_request(payload)
-    if isinstance(request, JSONResponse):
+    submission = parse_acvp_results_submission_payload(payload)
+    if isinstance(submission, JSONResponse):
         return _canonical_response(
-            request,
+            submission,
             profile=profile,
             include_local_metadata=includeLocalMetadata,
         )
     return _canonical_response(
-        submit_vector_set_results(sessionId, vectorSetId, request.response, update=True),
+        submit_vector_set_results(
+            sessionId,
+            vectorSetId,
+            submission["response"],
+            show_expected=submission["showExpected"],
+            update=True,
+        ),
         profile=profile,
         include_local_metadata=includeLocalMetadata,
     )
@@ -297,11 +308,16 @@ def submit_acvp_v1_vector_set_results(
     vectorSetId: str,
     payload: Any = Body(...),
 ) -> Any:
-    request = _parse_results_submit_request(payload)
-    if isinstance(request, JSONResponse):
-        return _compatibility_alias_response(request)
+    submission = parse_acvp_results_submission_payload(payload)
+    if isinstance(submission, JSONResponse):
+        return _compatibility_alias_response(submission)
     return _compatibility_alias_response(
-        submit_vector_set_results(None, vectorSetId, request.response)
+        submit_vector_set_results(
+            None,
+            vectorSetId,
+            submission["response"],
+            show_expected=submission["showExpected"],
+        )
     )
 
 
@@ -343,6 +359,23 @@ def _with_compatibility_alias(body: Any) -> Any:
     if not isinstance(body, dict):
         return body
     aliased = dict(body)
+    local_extension = aliased.get("extensions", {}).get("localFips204Skeleton")
+    if isinstance(local_extension, dict):
+        for key in (
+            "vectorSetId",
+            "testSessionId",
+            "status",
+            "submissionAction",
+            "localSkeletonPutReplaceBehavior",
+            "localPostReturnsResults",
+            "validationResult",
+            "report",
+            "stateHistory",
+        ):
+            if key in local_extension and key not in aliased:
+                aliased[key] = local_extension[key]
+    if "results" in aliased:
+        aliased["acvpResults"] = {"results": aliased["results"]}
     aliased["localCompatibilityAlias"] = True
     return aliased
 
@@ -352,6 +385,97 @@ def _json_response_body(response: JSONResponse) -> Dict[str, Any]:
     if not isinstance(content, dict):
         return {"value": content}
     return content
+
+
+def parse_acvp_results_submission_payload(payload: Any) -> Any:
+    if isinstance(payload, AcvpV1VectorSetResultsSubmitRequest):
+        return {
+            "response": payload.response,
+            "showExpected": False,
+        }
+    if isinstance(payload, list):
+        return _parse_acvp_results_envelope(payload)
+    if isinstance(payload, dict):
+        if "response" in payload:
+            response = payload.get("response")
+            show_expected = _bool_value(payload.get("showExpected"))
+            if isinstance(response, dict) and "showExpected" in response:
+                response, nested_show_expected = _without_show_expected(response)
+                show_expected = nested_show_expected
+            return {
+                "response": response,
+                "showExpected": show_expected,
+            }
+        if _looks_like_vector_set_response(payload):
+            response, show_expected = _without_show_expected(payload)
+            return {
+                "response": response,
+                "showExpected": show_expected,
+            }
+        return acvp_skeleton_error(
+            400,
+            "INVALID_REQUEST",
+            "Request must be a local response wrapper, ACVP envelope, or response body.",
+            "$",
+        )
+    return acvp_skeleton_error(
+        400,
+        "INVALID_REQUEST",
+        "Request body must be a JSON object or ACVP array envelope.",
+        "$",
+    )
+
+
+def _parse_acvp_results_envelope(payload: Any) -> Any:
+    if len(payload) < 2:
+        return acvp_skeleton_error(
+            400,
+            "INVALID_ACVP_ENVELOPE",
+            "ACVP envelope must contain version and body objects.",
+            "$",
+        )
+    version = payload[0]
+    if not isinstance(version, dict) or "acvVersion" not in version:
+        return acvp_skeleton_error(
+            400,
+            "INVALID_ACVP_ENVELOPE",
+            "ACVP envelope must start with an acvVersion object.",
+            "$[0].acvVersion",
+        )
+    if version.get("acvVersion") != "1.0":
+        return acvp_skeleton_error(
+            400,
+            "UNSUPPORTED_ACVP_VERSION",
+            "Only acvVersion 1.0 is supported by this local skeleton.",
+            "$[0].acvVersion",
+        )
+    body = payload[1]
+    if not isinstance(body, dict):
+        return acvp_skeleton_error(
+            400,
+            "INVALID_ACVP_ENVELOPE",
+            "ACVP results envelope body must be a JSON object.",
+            "$[1]",
+        )
+    response, show_expected = _without_show_expected(body)
+    return {
+        "response": response,
+        "showExpected": show_expected,
+    }
+
+
+def _without_show_expected(body: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
+    response = dict(body)
+    show_expected = _bool_value(response.pop("showExpected", False))
+    return response, show_expected
+
+
+def _bool_value(value: Any) -> bool:
+    return value is True
+
+
+def _looks_like_vector_set_response(payload: Dict[str, Any]) -> bool:
+    return bool({"vsId", "algorithm", "mode", "revision", "testGroups"}.intersection(payload))
 
 
 def _parse_session_create_request(payload: Any) -> Any:
