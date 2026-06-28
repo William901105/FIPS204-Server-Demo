@@ -70,6 +70,7 @@ class AcvpV1TestSessionCreateRequest(BaseModel):
     autoGenerateVectorSets: bool = True
     campaignSeed: Optional[str] = None
     testsPerGroup: Optional[int] = None
+    generationProfile: Optional[str] = None
     expiresInSeconds: Optional[int] = Field(default=None, ge=0)
     metadata: Optional[JsonObject] = None
 
@@ -77,6 +78,7 @@ class AcvpV1TestSessionCreateRequest(BaseModel):
 class AcvpV1VectorSetGenerateRequest(BaseModel):
     campaignSeed: Optional[str] = None
     testsPerGroup: Optional[int] = None
+    generationProfile: Optional[str] = None
     expiresInSeconds: Optional[int] = Field(default=None, ge=0)
 
 

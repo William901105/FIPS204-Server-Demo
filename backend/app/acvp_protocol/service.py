@@ -35,8 +35,13 @@ from .errors import acvp_error_response
 from .paging import apply_paging, build_paged_body
 from .vector_generation import (
     DEFAULT_TESTS_PER_GROUP,
-    GENERATION_PROFILE,
+    GENERATION_PROFILES,
+    LOCAL_DEBUG_PROFILE,
     MAX_TESTS_PER_GROUP,
+    NIST_CONFORMANCE_PROFILE,
+    NIST_KEYGEN_TESTS_PER_GROUP,
+    NIST_SIGGEN_TESTS_PER_GROUP,
+    NIST_SIGVER_TESTS_PER_GROUP,
     fallback_campaign_seed,
     generate_vector_sets_from_negotiated_capabilities,
 )
@@ -290,8 +295,12 @@ def _create_registration_session(payload: AcvpV1TestSessionCreateRequest) -> Any
             container_payload["metadata"] = payload.metadata
         registration_container = validate_registration_container(container_payload)
         negotiated_capabilities = negotiate_mldsa_capabilities(registration_container)
+        generation_profile = _resolve_generation_profile(payload.generationProfile)
         campaign_seed = _resolve_campaign_seed(payload.campaignSeed, registration_container)
-        tests_per_group = _resolve_tests_per_group(payload.testsPerGroup)
+        tests_per_group = _resolve_tests_per_group(
+            payload.testsPerGroup,
+            generation_profile,
+        )
     except AcvpSchemaError as exc:
         return acvp_skeleton_error(400, exc.code, exc.message, exc.path)
 
@@ -311,6 +320,7 @@ def _create_registration_session(payload: AcvpV1TestSessionCreateRequest) -> Any
         "unsupported": negotiated_capabilities["unsupported"],
         "campaignSeed": campaign_seed,
         "testsPerGroup": tests_per_group,
+        "generationProfile": generation_profile,
         "vectorSetIds": [],
         "vectorSetUrls": [],
         "nextAction": VECTOR_GENERATION_AVAILABLE_ACTION,
@@ -329,6 +339,7 @@ def _create_registration_session(payload: AcvpV1TestSessionCreateRequest) -> Any
             session,
             campaign_seed=campaign_seed,
             tests_per_group=tests_per_group,
+            generation_profile=generation_profile,
             expires_at=expires_at,
             reason="Registration requested autoGenerateVectorSets.",
         )
@@ -376,11 +387,17 @@ def generate_vector_sets_for_session(
 
     try:
         campaign_seed = _resolve_campaign_seed(
-            payload.campaignSeed or session.get("campaignSeed"),
+            payload.campaignSeed if payload.campaignSeed is not None else session.get("campaignSeed"),
             session["registration"],
         )
+        generation_profile = _resolve_generation_profile(
+            payload.generationProfile
+            if payload.generationProfile is not None
+            else session.get("generationProfile")
+        )
         tests_per_group = _resolve_tests_per_group(
-            payload.testsPerGroup or session.get("testsPerGroup")
+            payload.testsPerGroup if payload.testsPerGroup is not None else session.get("testsPerGroup"),
+            generation_profile,
         )
     except AcvpSchemaError as exc:
         return acvp_skeleton_error(400, exc.code, exc.message, exc.path)
@@ -389,6 +406,7 @@ def generate_vector_sets_for_session(
         session,
         campaign_seed=campaign_seed,
         tests_per_group=tests_per_group,
+        generation_profile=generation_profile,
         expires_at=_expires_at_from_seconds(payload.expiresInSeconds) or session.get("expiresAt"),
         reason="Explicit vector generation endpoint called.",
     )
@@ -410,6 +428,9 @@ def _registration_session_response(session: Dict[str, Any]) -> Dict[str, Any]:
         "createdAt": session["createdAt"],
         "updatedAt": session["updatedAt"],
         "expiresAt": session.get("expiresAt"),
+        "campaignSeed": session.get("campaignSeed"),
+        "testsPerGroup": session.get("testsPerGroup"),
+        "generationProfile": session.get("generationProfile"),
         "stateHistory": list(session.get("stateHistory", [])),
     }
     if "vectorGeneration" in session:
@@ -424,6 +445,7 @@ def _generate_and_store_vector_sets(
     *,
     campaign_seed: str,
     tests_per_group: int,
+    generation_profile: str,
     expires_at: Optional[str],
     reason: str,
 ) -> Optional[JSONResponse]:
@@ -432,11 +454,13 @@ def _generate_and_store_vector_sets(
             session["negotiatedCapabilities"],
             campaign_seed=campaign_seed,
             tests_per_group=tests_per_group,
+            generation_profile=generation_profile,
         )
         prepared = _prepare_generated_vector_sets(
             session["testSessionId"],
             prompts,
             campaign_seed,
+            generation_profile,
         )
     except AcvpSchemaError as exc:
         return acvp_skeleton_error(500, exc.code, exc.message, exc.path)
@@ -463,7 +487,7 @@ def _generate_and_store_vector_sets(
             vector_set,
             VectorSetStatus.READY.value,
             reason="Expected results generated for negotiated vector set.",
-            metadata={"generationProfile": GENERATION_PROFILE},
+            metadata={"generationProfile": generation_profile},
         )
         save_acvp_vector_set(vector_set)
         vector_set_ids.append(vector_set["vectorSetId"])
@@ -488,23 +512,26 @@ def _generate_and_store_vector_sets(
         metadata={
             "campaignSeed": campaign_seed,
             "testsPerGroup": tests_per_group,
+            "generationProfile": generation_profile,
             "generatedVectorSetCount": len(vector_set_ids),
         },
     )
     session["campaignSeed"] = campaign_seed
     session["testsPerGroup"] = tests_per_group
+    session["generationProfile"] = generation_profile
     session["vectorSetIds"] = vector_set_ids
     session["vectorSetUrls"] = vector_set_urls
     session["nextAction"] = "Download vector sets and submit results."
     session["vectorGeneration"] = {
         "campaignSeed": campaign_seed,
         "testsPerGroup": tests_per_group,
+        "effectiveMinimums": _generation_profile_minimums(generation_profile),
         "generatedVectorSetCount": len(vector_set_ids),
         "modes": [
             normalize_acvp_json(vector_set["prompt"])["mode"]
             for vector_set in prepared
         ],
-        "generationProfile": GENERATION_PROFILE,
+        "generationProfile": generation_profile,
         "localSkeletonBehavior": True,
     }
     save_acvp_session(session)
@@ -515,6 +542,7 @@ def _prepare_generated_vector_sets(
     session_id: str,
     prompts: List[Dict[str, Any]],
     campaign_seed: str,
+    generation_profile: str,
 ) -> List[Dict[str, Any]]:
     prepared: List[Dict[str, Any]] = []
     for prompt in prompts:
@@ -536,7 +564,7 @@ def _prepare_generated_vector_sets(
                 "mode": prompt_vs["mode"],
                 "vsId": prompt_vs["vsId"],
                 "campaignSeed": campaign_seed,
-                "generationProfile": GENERATION_PROFILE,
+                "generationProfile": generation_profile,
                 **SKELETON_METADATA,
             }
         )
@@ -563,18 +591,57 @@ def _resolve_campaign_seed(
     return provided_seed.upper()
 
 
-def _resolve_tests_per_group(value: Optional[int]) -> int:
+def _resolve_generation_profile(value: Optional[str]) -> str:
+    if value is None:
+        return LOCAL_DEBUG_PROFILE
+    if not isinstance(value, str):
+        raise AcvpSchemaError(
+            "invalid_type",
+            "generationProfile must be a string",
+            "$.generationProfile",
+        )
+    if value not in GENERATION_PROFILES:
+        raise AcvpSchemaError(
+            "invalid_value",
+            "generationProfile must be one of: "
+            + ", ".join(sorted(GENERATION_PROFILES)),
+            "$.generationProfile",
+        )
+    return value
+
+
+def _resolve_tests_per_group(value: Optional[int], generation_profile: str) -> int:
     if value is None:
         return DEFAULT_TESTS_PER_GROUP
     if not isinstance(value, int) or isinstance(value, bool):
         raise AcvpSchemaError("invalid_type", "testsPerGroup must be an integer", "$.testsPerGroup")
-    if value < 1 or value > MAX_TESTS_PER_GROUP:
+    if value < 1:
+        raise AcvpSchemaError(
+            "invalid_value",
+            "testsPerGroup must be at least 1",
+            "$.testsPerGroup",
+        )
+    if generation_profile == LOCAL_DEBUG_PROFILE and value > MAX_TESTS_PER_GROUP:
         raise AcvpSchemaError(
             "invalid_value",
             f"testsPerGroup must be between 1 and {MAX_TESTS_PER_GROUP}",
             "$.testsPerGroup",
         )
     return value
+
+
+def _generation_profile_minimums(generation_profile: str) -> Dict[str, int]:
+    if generation_profile == NIST_CONFORMANCE_PROFILE:
+        return {
+            "keyGen": NIST_KEYGEN_TESTS_PER_GROUP,
+            "sigGen": NIST_SIGGEN_TESTS_PER_GROUP,
+            "sigVer": NIST_SIGVER_TESTS_PER_GROUP,
+        }
+    return {
+        "keyGen": DEFAULT_TESTS_PER_GROUP,
+        "sigGen": DEFAULT_TESTS_PER_GROUP,
+        "sigVer": 2,
+    }
 
 
 def get_test_session(session_id: str) -> Any:
