@@ -33,6 +33,7 @@ from .service import (
     version,
 )
 from .envelope import envelope_response
+from .paging import parse_paging_params
 
 
 router = APIRouter(prefix="/acvp/v1", tags=["ACVP v1 skeleton"])
@@ -65,11 +66,24 @@ def get_acvp_v1_algorithms(
 @router.get("/testSessions")
 def list_acvp_v1_test_sessions(
     status: Optional[str] = None,
+    limit: Any = None,
+    offset: Any = None,
     profile: Optional[str] = None,
     includeLocalMetadata: bool = False,
 ) -> Any:
+    paging = parse_paging_params(limit=limit, offset=offset)
+    if isinstance(paging, JSONResponse):
+        return _canonical_response(
+            paging,
+            profile=profile,
+            include_local_metadata=includeLocalMetadata,
+        )
     return _canonical_response(
-        list_test_sessions(status=status),
+        list_test_sessions(
+            status=status,
+            limit=paging["limit"],
+            offset=paging["offset"],
+        ),
         profile=profile,
         include_local_metadata=includeLocalMetadata,
     )
@@ -111,11 +125,26 @@ def get_acvp_v1_test_session(
 @router.get("/testSessions/{sessionId}/vectorSets")
 def get_acvp_v1_test_session_vector_sets(
     sessionId: str,
+    status: Optional[str] = None,
+    limit: Any = None,
+    offset: Any = None,
     profile: Optional[str] = None,
     includeLocalMetadata: bool = False,
 ) -> Any:
+    paging = parse_paging_params(limit=limit, offset=offset)
+    if isinstance(paging, JSONResponse):
+        return _canonical_response(
+            paging,
+            profile=profile,
+            include_local_metadata=includeLocalMetadata,
+        )
     return _canonical_response(
-        get_test_session_vector_sets(sessionId),
+        get_test_session_vector_sets(
+            sessionId,
+            status=status,
+            limit=paging["limit"],
+            offset=paging["offset"],
+        ),
         profile=profile,
         include_local_metadata=includeLocalMetadata,
     )
@@ -340,10 +369,18 @@ def _canonical_response(
     if profile == "debug" or include_local_metadata:
         return value
     if isinstance(value, JSONResponse):
-        body = _json_response_body(value)
+        content = _json_response_content(value)
+        if _is_acvp_envelope(content):
+            return JSONResponse(
+                status_code=value.status_code,
+                content=content,
+                headers=_forwarded_headers(value),
+            )
+        body = _json_response_body_from_content(content)
         return JSONResponse(
             status_code=value.status_code,
             content=envelope_response(body, include_local_metadata=True),
+            headers=_forwarded_headers(value),
         )
     return envelope_response(value, include_local_metadata=True)
 
@@ -351,7 +388,11 @@ def _canonical_response(
 def _compatibility_alias_response(value: Any) -> Any:
     if isinstance(value, JSONResponse):
         body = _with_compatibility_alias(_json_response_body(value))
-        return JSONResponse(status_code=value.status_code, content=body)
+        return JSONResponse(
+            status_code=value.status_code,
+            content=body,
+            headers=_forwarded_headers(value),
+        )
     return _with_compatibility_alias(value)
 
 
@@ -381,10 +422,32 @@ def _with_compatibility_alias(body: Any) -> Any:
 
 
 def _json_response_body(response: JSONResponse) -> Dict[str, Any]:
-    content = json.loads(response.body.decode("utf-8"))
+    content = _json_response_content(response)
+    return _json_response_body_from_content(content)
+
+
+def _json_response_content(response: JSONResponse) -> Any:
+    return json.loads(response.body.decode("utf-8"))
+
+
+def _json_response_body_from_content(content: Any) -> Dict[str, Any]:
     if not isinstance(content, dict):
         return {"value": content}
     return content
+
+
+def _is_acvp_envelope(content: Any) -> bool:
+    return (
+        isinstance(content, list)
+        and len(content) >= 2
+        and isinstance(content[0], dict)
+        and content[0].get("acvVersion") == "1.0"
+    )
+
+
+def _forwarded_headers(response: JSONResponse) -> Dict[str, str]:
+    request_id = response.headers.get("X-Request-ID")
+    return {"X-Request-ID": request_id} if request_id else {}
 
 
 def parse_acvp_results_submission_payload(payload: Any) -> Any:

@@ -31,6 +31,8 @@ from .capabilities import (
     validate_registration_container,
 )
 from .disposition import build_acvp_vector_set_results
+from .errors import acvp_error_response
+from .paging import apply_paging, build_paged_body
 from .vector_generation import (
     DEFAULT_TESTS_PER_GROUP,
     GENERATION_PROFILE,
@@ -82,18 +84,15 @@ def acvp_skeleton_error(
     code: str,
     message: str,
     path: Optional[str] = None,
+    *,
+    details: Optional[Dict[str, Any]] = None,
 ) -> JSONResponse:
-    return JSONResponse(
+    return acvp_error_response(
         status_code=status_code,
-        content=with_skeleton_metadata(
-            {
-                "error": {
-                    "code": code,
-                    "message": message,
-                    "path": path,
-                }
-            }
-        ),
+        code=code,
+        message=message,
+        path=path,
+        details=details,
     )
 
 
@@ -103,7 +102,7 @@ def version() -> Dict[str, Any]:
             "acvVersion": "1.0",
             "apiVersion": "v1",
             "serverName": "FIPS204 ACVP Local Skeleton",
-            "implementationPhase": "4-3-commit2",
+            "implementationPhase": "4-3-commit3",
             "nistReferences": NIST_REFERENCES,
         }
     )
@@ -144,6 +143,7 @@ def algorithms() -> Dict[str, Any]:
                         "Phase 4-1 supports SQLite-backed local-fips204-skeleton persistence; production vector generation is not implemented.",
                         "Phase 4-3 Commit 1 adds ACVP array envelopes and canonical nested vectorSet routes while remaining a local skeleton.",
                         "Phase 4-3 Commit 2 adds a local ACVP results disposition adapter and showExpected support.",
+                        "Phase 4-3 Commit 3 adds local paging/query hardening and normalized ACVP error envelopes.",
                         "Production auth/JWT/mTLS is not implemented.",
                         "Production database deployment is not implemented.",
                     ],
@@ -154,16 +154,35 @@ def algorithms() -> Dict[str, Any]:
     )
 
 
-def list_test_sessions(status: Optional[str] = None) -> Dict[str, Any]:
+def list_test_sessions(
+    status: Optional[str] = None,
+    *,
+    limit: int,
+    offset: int,
+) -> Any:
+    status_error = _validate_status_filter(
+        status,
+        allowed={item.value for item in TestSessionStatus},
+        entity="test session",
+    )
+    if isinstance(status_error, JSONResponse):
+        return status_error
+
     sessions = list_acvp_sessions(status=status)
+    items = [_session_summary(session) for session in sessions]
+    page, pagination = apply_paging(items, limit=limit, offset=offset)
+    body = build_paged_body(
+        items=page,
+        key="testSessions",
+        limit=limit,
+        offset=offset,
+        total=pagination["total"],
+        resource_path="/acvp/v1/testSessions",
+        query={"status": status},
+    )
+    body["query"] = {"status": status} if status is not None else {}
     return with_skeleton_metadata(
-        {
-            "testSessions": [
-                _session_summary(session)
-                for session in sessions
-            ],
-            "query": {"status": status} if status is not None else {},
-        }
+        body
     )
 
 
@@ -575,27 +594,56 @@ def get_test_session(session_id: str) -> Any:
     )
 
 
-def get_test_session_vector_sets(session_id: str) -> Any:
+def get_test_session_vector_sets(
+    session_id: str,
+    status: Optional[str] = None,
+    *,
+    limit: int,
+    offset: int,
+) -> Any:
     session = _get_session(session_id)
     if isinstance(session, JSONResponse):
         return session
     _expire_session_if_needed(session)
 
-    return with_skeleton_metadata(
-        {
-            "testSessionId": session_id,
-            "vectorSets": [
-                _vector_set_summary(vector_set)
-                for vector_set in _session_vector_sets(session)
-            ],
-            **(
-                {"nextAction": VECTOR_GENERATION_AVAILABLE_ACTION}
-                if not session["vectorSetIds"]
-                and session["status"] == "capabilitiesAccepted"
-                else {}
-            ),
-        }
+    status_error = _validate_status_filter(
+        status,
+        allowed={item.value for item in VectorSetStatus},
+        entity="vector set",
     )
+    if isinstance(status_error, JSONResponse):
+        return status_error
+
+    summaries = [
+        _vector_set_summary(vector_set)
+        for vector_set in _session_vector_sets(session)
+    ]
+    if status is not None:
+        summaries = [
+            summary
+            for summary in summaries
+            if summary["status"] == status
+        ]
+    page, pagination = apply_paging(summaries, limit=limit, offset=offset)
+    vector_set_urls = [summary["url"] for summary in page]
+    body = build_paged_body(
+        items=vector_set_urls,
+        key="vectorSetUrls",
+        limit=limit,
+        offset=offset,
+        total=pagination["total"],
+        resource_path=f"/acvp/v1/testSessions/{session_id}/vectorSets",
+        query={"status": status},
+    )
+    body["testSessionId"] = session_id
+    body["vectorSets"] = page
+    body["query"] = {"status": status} if status is not None else {}
+    if not session["vectorSetIds"] and session["status"] == "capabilitiesAccepted":
+        body["nextAction"] = VECTOR_GENERATION_AVAILABLE_ACTION
+    local_extension = body["extensions"]["localFips204Skeleton"]
+    local_extension["vectorSets"] = page
+    local_extension["query"] = body["query"]
+    return with_skeleton_metadata(body)
 
 
 def get_vector_set(vector_set_id: str) -> Any:
@@ -1508,6 +1556,29 @@ def _cancel_session_if_all_vector_sets_cancelled(session_id: str) -> None:
 
 def _state_transition_error_response(exc: StateTransitionError) -> JSONResponse:
     return acvp_skeleton_error(409, exc.code, exc.message, exc.path)
+
+
+def _validate_status_filter(
+    status: Optional[str],
+    *,
+    allowed: set,
+    entity: str,
+) -> Optional[JSONResponse]:
+    if status is None:
+        return None
+    if status not in allowed:
+        return acvp_skeleton_error(
+            400,
+            "INVALID_QUERY_PARAMETER",
+            f"Unsupported {entity} status filter.",
+            "$.status",
+            details={
+                "parameter": "status",
+                "value": status,
+                "allowed": sorted(allowed),
+            },
+        )
+    return None
 
 
 def _expires_at_from_seconds(expires_in_seconds: Optional[int]) -> Optional[str]:

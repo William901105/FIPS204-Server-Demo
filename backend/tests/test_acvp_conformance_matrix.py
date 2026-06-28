@@ -81,9 +81,16 @@ def test_acvp_v1_protocol_hardening_doc_exists_and_documents_phase_4_3() -> None
 
     assert "Phase 4-3 Commit 1" in text
     assert "Phase 4-3 Commit 2" in text
+    assert "Phase 4-3 Commit 3" in text
     assert "/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}/expected" in text
     assert "extensions.localFips204Skeleton" in text
     assert "localCompatibilityAlias=true" in text
     assert "results.disposition" in text
     assert "showExpected" in text
     assert "localPostReturnsResults=true" in text
+    assert "INVALID_QUERY_PARAMETER" in text
+    assert "X-Request-ID" in text
+    assert "totalCount" in text
+    assert "Phase 4-3D paging/query: implemented local" in (
+        Path(__file__).resolve().parents[1] / "docs" / "acvp-conformance-matrix.md"
+    ).read_text(encoding="utf-8")

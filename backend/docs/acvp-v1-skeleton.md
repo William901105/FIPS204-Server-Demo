@@ -9,6 +9,7 @@ Phase 4-3 adds protocol hardening:
 - Local skeleton metadata moved under `extensions.localFips204Skeleton`.
 - Existing flat vector set routes retained as local compatibility aliases.
 - Commit 2 maps internal vector set validation into a NIST-like `results` object and adds `showExpected` support.
+- Commit 3 adds local paging/query hardening and normalized ACVP error envelopes with request IDs.
 
 This remains a local skeleton, not a production-ready ACVP server. `/acvp/v1` still reports `productionReady=false`.
 
@@ -26,6 +27,8 @@ The NIST ACVP Protocol Specification is the protocol authority for URI hierarchy
 For Phase 4-3 Commit 1, the prompt matched the NIST protocol on the important vector set route shape: vector set download, results, update, cancellation, and expected result retrieval are nested below `testSessions/{testSessionId}`. The prompt also correctly called out that the NIST expected result path uses `/expected`, not the old local `/expectedResults` alias.
 
 For Phase 4-3 Commit 2, the implementation follows the NIST result object fields and the enumerated `fail` value. The NIST text also states POST result submission may return no content; this skeleton returns envelope results for developer usability and marks that local behavior in `extensions.localFips204Skeleton`.
+
+For Phase 4-3 Commit 3, the implementation follows NIST paging fields `totalCount`, `incomplete`, `links`, and `data` for paged list bodies. The prompt requested a `pagination` object, so the skeleton also exposes that object as local compatibility metadata. The NIST query parameter section defines a more general indexed filter syntax; this skeleton supports only the documented local `status=<status>` filter on test session and vector set lists.
 
 ## ACVP Envelope
 
@@ -59,10 +62,10 @@ For debugging, canonical routes accept `profile=debug` or `includeLocalMetadata=
 | --- | --- | --- |
 | GET | `/acvp/v1/version` | Returns local skeleton protocol/version metadata in an ACVP envelope. |
 | GET | `/acvp/v1/algorithms` | Returns ML-DSA capability summary for the local implementation in an ACVP envelope. |
-| GET | `/acvp/v1/testSessions` | Lists SQLite-backed skeleton sessions. |
+| GET | `/acvp/v1/testSessions` | Lists SQLite-backed skeleton sessions with `status`, `limit`, and `offset` query hardening. |
 | POST | `/acvp/v1/testSessions` | Creates a local prompt-based skeleton session or a registration session that can generate vector sets. |
 | GET | `/acvp/v1/testSessions/{sessionId}` | Returns skeleton session detail and vector set metadata. |
-| GET | `/acvp/v1/testSessions/{sessionId}/vectorSets` | Lists vector sets for a skeleton session. |
+| GET | `/acvp/v1/testSessions/{sessionId}/vectorSets` | Lists vector sets for a skeleton session with `status`, `limit`, and `offset` query hardening. |
 | POST | `/acvp/v1/testSessions/{sessionId}/vectorSets/generate` | Local skeleton helper that generates vector sets for a `capabilitiesAccepted` session. |
 | GET | `/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}` | NIST canonical nested vector set download. Marks `ready` vector sets as `downloaded`. |
 | DELETE | `/acvp/v1/testSessions/{sessionId}/vectorSets/{vectorSetId}` | NIST canonical nested vector set cancellation. Soft-cancels the vector set and records state events. |
@@ -127,6 +130,55 @@ The local skeleton maps internal validator statuses to ACVP results as follows:
 
 The old local `validationResult` and `report` remain persisted for debug/local flows and flat compatibility aliases, but canonical GET results no longer returns them at top level.
 
+## Paging And Query Parameters
+
+Commit 3 supports paging on canonical list endpoints only:
+
+| Endpoint | Supported query parameters |
+| --- | --- |
+| `GET /acvp/v1/testSessions` | `status`, `limit`, `offset` |
+| `GET /acvp/v1/testSessions/{sessionId}/vectorSets` | `status`, `limit`, `offset` |
+
+Paging policy:
+
+- `limit` default: `25`
+- `offset` default: `0`
+- `limit` maximum: `100`
+- invalid `limit`, invalid `offset`, or unknown `status` returns `400 INVALID_QUERY_PARAMETER`
+
+Paged responses include NIST-style `totalCount`, `incomplete`, `links`, and `data`. They also include local skeleton aliases:
+
+- `testSessions` mirrors `data` for session lists.
+- `vectorSetUrls` is the canonical vector set URL list.
+- `vectorSets` is a local richer summary for skeleton usability.
+- `pagination` gives `offset`, `limit`, `total`, `returned`, and `incomplete`.
+
+The `pagination` object and richer `vectorSets` list are local skeleton behavior, not a full production ACVP claim. Local metadata remains under `extensions.localFips204Skeleton`.
+
+## Error Responses
+
+Commit 3 normalizes canonical `/acvp/v1` errors into the ACVP envelope:
+
+```json
+[
+  {"acvVersion": "1.0"},
+  {
+    "error": {
+      "code": "INVALID_QUERY_PARAMETER",
+      "message": "limit must be an integer between 1 and 100.",
+      "path": "$.limit",
+      "requestId": "phase43c3-invalid-limit",
+      "details": {
+        "parameter": "limit",
+        "value": "abc"
+      }
+    }
+  }
+]
+```
+
+The response also carries `X-Request-ID`. If a client supplies `X-Request-ID`, the same value is returned in the header and in `error.requestId`; otherwise a UUID-like value is generated. Unknown `/acvp/v1` routes and method-not-allowed responses are normalized. `/api/...` endpoints remain ordinary local API endpoints and are not wrapped in ACVP envelopes.
+
 ## State And Persistence
 
 Nested routes enforce session/vector set ownership. If a vector set does not belong to the supplied session, the local skeleton returns `404 UNKNOWN_VECTOR_SET` to avoid revealing vector set existence across sessions.
@@ -137,8 +189,6 @@ The default SQLite path remains `backend/data/acvp.sqlite3`; set `ACVP_DB_PATH=/
 
 ## Remaining Deviations
 
-- Paging/query hardening remains Phase 4-3D.
-- Error normalization remains Phase 4-3E.
 - Authentication, JWT, and mTLS remain Phase 4-2.
 - Large submission and async validation remain Phase 4-4.
 - Vendor/module/OE/dependency resources remain out of scope.
